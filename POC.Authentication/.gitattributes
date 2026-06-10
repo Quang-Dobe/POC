@@ -1,0 +1,3 @@
+# Force LF on shell scripts so container `sh` never chokes on CRLF (the seed runs in Alpine/UBI
+# `sh`; a stray \r breaks `set -e` lines and URL/env values). Added with Step G infra.
+*.sh text eol=lf

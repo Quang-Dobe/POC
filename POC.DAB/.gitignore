@@ -1,0 +1,19 @@
+# DAB's env now lives in the ROOT .env.dev / .env.prod (see ../.env.example) — POC.DAB keeps no
+# env files of its own. DAB reads a file literally named `.env` (DotNetEnv); if you create a local
+# one (e.g. Copy-Item ..\.env.dev .env for a manual `dab start`), it is ignored.
+.env
+.env.*
+
+# DAB-generated merged configs (artifacts of dab validate/start)
+*.merged.json
+
+# Build artifacts
+bin/
+obj/
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+docs/*

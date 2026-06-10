@@ -1,0 +1,32 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_STRICT: "false"
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTPS_PORT: "8080"
+      KC_HTTPS_KEY_STORE_FILE: /opt/keycloak/conf/dev-cert.pfx
+      KC_HTTPS_KEY_STORE_PASSWORD: changeit
+      KC_HTTPS_KEY_STORE_TYPE: PKCS12
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: "8081"
+      KC_FEATURES: "token-exchange"
+    ports:
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    volumes:
+      - ./realm-export.json:/opt/keycloak/data/import/realm-poc.json:ro
+      - ./certs/dev-cert.pfx:/opt/keycloak/conf/dev-cert.pfx:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "bash -c 'exec 3<>/dev/tcp/localhost/8081; echo -e \"GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n\" >&3; grep -q \"\\\"status\\\": \\\"UP\\\"\" <&3'"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s

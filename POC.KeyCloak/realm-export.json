@@ -1,0 +1,377 @@
+{
+  "realm": "poc",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "defaultSignatureAlgorithm": "RS256",
+  "accessTokenLifespan": 600,
+  "roles": {
+    "realm": [
+      {
+        "name": "reader",
+        "description": "DAB: may read all exposed entities"
+      },
+      {
+        "name": "manager",
+        "description": "DAB: may read entities; Geography rows filtered by the region claim"
+      }
+    ]
+  },
+  "clientScopes": [
+    {
+      "name": "profile",
+      "description": "Built-in profile scope (must be defined explicitly: an explicit clientScopes array suppresses Keycloak's auto-created built-ins; Step H gate fix, user-approved).",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "email",
+      "description": "Built-in email scope (same explicit-definition reason as profile).",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    },
+    {
+      "name": "poc-api",
+      "description": "POC.Authentication: adds poc-api as an audience (aud) on poc-spa access tokens (oidc-dual-idp R2).",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "poc-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "poc-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "poc-spa",
+      "name": "POC.Authentication SPA (public PKCE client)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*"
+      },
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "poc-api"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "poc-api",
+      "name": "POC.Authentication API (resource server + service account for agent token exchange)",
+      "description": "Confidential client: validates incoming JWTs (aud=poc-api) and issues client_credentials tokens with aud=agent-gateway for downstream calls.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "secret": "poc-api-dev-secret",
+      "protocolMappers": [
+        {
+          "name": "poc-api-to-agent-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "agent-gateway",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "poc-dab",
+      "name": "POC.DAB API client (password grant)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "realm-roles-top-level",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "poc-dab-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "poc-dab",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        },
+        {
+          "name": "region-attribute",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "region",
+            "claim.name": "region",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        }
+      ],
+      "secret": "poc-dab-dev-secret",
+      "authorizationServicesEnabled": true,
+      "authorizationSettings": {
+        "allowRemoteResourceManagement": true,
+        "policyEnforcementMode": "ENFORCING",
+        "resources": [],
+        "policies": [
+          {
+            "name": "agent-gateway-client-policy",
+            "type": "client",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "clients": "[\"agent-gateway\"]"
+            }
+          },
+          {
+            "name": "token-exchange.permission.client.poc-dab",
+            "type": "scope",
+            "logic": "POSITIVE",
+            "decisionStrategy": "UNANIMOUS",
+            "config": {
+              "scopes": "[\"token-exchange\"]",
+              "applyPolicies": "[\"agent-gateway-client-policy\"]"
+            }
+          }
+        ],
+        "scopes": [
+          {
+            "name": "token-exchange"
+          }
+        ],
+        "decisionStrategy": "UNANIMOUS"
+      }
+    },
+    {
+      "clientId": "agent-gateway",
+      "name": "Agent Gateway Service (token exchange, confidential)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "agent-gateway-dev-secret",
+      "defaultClientScopes": [
+        "profile"
+      ],
+      "optionalClientScopes": [],
+      "protocolMappers": [
+        {
+          "name": "realm-roles-top-level",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "region-attribute",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "region",
+            "claim.name": "region",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "poc-dab-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "poc-dab",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "testuser",
+      "enabled": true,
+      "emailVerified": true,
+      "email": "testuser@poc.local",
+      "firstName": "Test",
+      "lastName": "User",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ]
+    },
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Reader",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "alice",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "reader"
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "ManagerNY",
+      "attributes": {
+        "region": [
+          "Manhattan County"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "bob",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "manager"
+      ]
+    },
+    {
+      "username": "carol",
+      "enabled": true,
+      "email": "carol@example.com",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "ManagerQueens",
+      "attributes": {
+        "region": [
+          "Queens County"
+        ]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "carol",
+          "temporary": false
+        }
+      ],
+      "realmRoles": [
+        "manager"
+      ]
+    },
+    {
+      "username": "dave",
+      "enabled": true,
+      "email": "dave@example.com",
+      "emailVerified": true,
+      "firstName": "Dave",
+      "lastName": "NoRoles",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "dave",
+          "temporary": false
+        }
+      ],
+      "realmRoles": []
+    },
+    {
+      "username": "service-account-agent-gateway",
+      "enabled": true,
+      "serviceAccountClientId": "agent-gateway",
+      "realmRoles": [
+        "reader"
+      ]
+    }
+  ]
+}

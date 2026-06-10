@@ -1,0 +1,2 @@
+include:
+  - ../POC.KeyCloak/docker-compose.yml

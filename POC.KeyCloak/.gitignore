@@ -1,0 +1,5 @@
+# Local TLS material — exported .NET dev cert for Keycloak HTTPS. Regenerate per machine:
+#   dotnet dev-certs https -ep ./certs/dev-cert.pfx -p changeit
+certs/
+
+docs/*

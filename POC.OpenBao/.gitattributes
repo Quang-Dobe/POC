@@ -1,0 +1,4 @@
+# Force LF on shell scripts so container `sh` never chokes on CRLF (seed.sh runs in the OpenBAO
+# image's `sh`; a stray \r breaks `set -e` lines and URL/env values). The compose entrypoint also
+# strips CR as belt-and-suspenders.
+*.sh text eol=lf

@@ -1,0 +1,186 @@
+{
+  "$schema": "https://github.com/Azure/data-api-builder/releases/download/v2.0.8/dab.draft.schema.json",
+  "data-source": {
+    "database-type": "dwsql",
+    "connection-string": "@env('FABRIC_CONN_STRING')"
+  },
+  "runtime": {
+    "rest": {
+      "enabled": true,
+      "path": "/api"
+    },
+    "graphql": {
+      "enabled": true,
+      "path": "/graphql",
+      "allow-introspection": false
+    },
+    "mcp": {
+      "enabled": true,
+      "path": "/mcp"
+    },
+    "health": {
+      "enabled": true,
+      "roles": [
+        "anonymous"
+      ]
+    },
+    "host": {
+      "mode": "production",
+      "cors": {
+        "origins": [],
+        "allow-credentials": false
+      },
+      "authentication": {
+        "provider": "AzureAD",
+        "jwt": {
+          "audience": "@env('AUTH_DAB_CLIENT_ID')",
+          "issuer": "@env('AUTH_AUTHORITY')"
+        }
+      }
+    }
+  },
+  "entities": {
+    "Trip": {
+      "source": {
+        "object": "dbo.Trip",
+        "type": "table",
+        "key-fields": [
+          "DateID",
+          "MedallionID",
+          "HackneyLicenseID",
+          "PickupTimeID",
+          "DropoffTimeID"
+        ]
+      },
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "Trip",
+          "plural": "Trips"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "reader",
+          "actions": [
+            "read"
+          ]
+        },
+        {
+          "role": "manager",
+          "actions": [
+            "read"
+          ]
+        }
+      ]
+    },
+    "Date": {
+      "source": {
+        "object": "dbo.Date",
+        "type": "table",
+        "key-fields": [
+          "DateID"
+        ]
+      },
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "DateDim",
+          "plural": "DateDims"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "reader",
+          "actions": [
+            "read"
+          ]
+        },
+        {
+          "role": "manager",
+          "actions": [
+            "read"
+          ]
+        }
+      ]
+    },
+    "Geography": {
+      "source": {
+        "object": "dbo.Geography",
+        "type": "table",
+        "key-fields": [
+          "GeographyID"
+        ]
+      },
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "Geography",
+          "plural": "Geographies"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "reader",
+          "actions": [
+            "read"
+          ]
+        },
+        {
+          "role": "manager",
+          "actions": [
+            {
+              "action": "read",
+              "policy": {
+                "database": "@item.County eq @claims.region"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "Weather": {
+      "source": {
+        "object": "dbo.Weather",
+        "type": "table",
+        "key-fields": [
+          "DateID",
+          "GeographyID"
+        ]
+      },
+      "graphql": {
+        "enabled": true,
+        "type": {
+          "singular": "Weather",
+          "plural": "Weathers"
+        }
+      },
+      "rest": {
+        "enabled": true
+      },
+      "permissions": [
+        {
+          "role": "reader",
+          "actions": [
+            "read"
+          ]
+        },
+        {
+          "role": "manager",
+          "actions": [
+            "read"
+          ]
+        }
+      ]
+    }
+  }
+}

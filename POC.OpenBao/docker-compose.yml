@@ -1,0 +1,29 @@
+services:
+  openbao:
+    image: openbao/openbao:latest
+    cap_add:
+      - IPC_LOCK
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: ${BAO_TOKEN}
+      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    ports:
+      - "${OPENBAO_PORT}:8200"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8200/v1/sys/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  openbao-seed:
+    image: openbao/openbao:latest
+    depends_on:
+      openbao:
+        condition: service_healthy
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: ${BAO_TOKEN}
+    volumes:
+      - ./seed.sh:/seed.sh:ro
+    entrypoint: ["/bin/sh", "-c", "sed 's/\r$//' /seed.sh | /bin/sh"]
+    restart: "no"

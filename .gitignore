@@ -1,0 +1,8 @@
+# Root POC env files — per-environment, NEVER commit real values.
+.env.dev
+.env.prod
+.env.*
+# ...except the committed template.
+!.env.example
+
+**/docs/*

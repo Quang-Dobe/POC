@@ -1,0 +1,21 @@
+{
+  "$schema": "https://github.com/Azure/data-api-builder/releases/download/v2.0.8/dab.draft.schema.json",
+  "runtime": {
+    "host": {
+      "mode": "development",
+      "cors": {
+        "origins": [
+          "http://localhost:3000"
+        ],
+        "allow-credentials": false
+      },
+      "authentication": {
+        "provider": "AzureAD",
+        "jwt": {
+          "audience": "@env('AUTH_DAB_CLIENT_ID')",
+          "issuer": "@env('AUTH_AUTHORITY')"
+        }
+      }
+    }
+  }
+}

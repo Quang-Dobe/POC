@@ -1,0 +1,12 @@
+# Keep the FE build context small + reproducible. node_modules is reinstalled via `npm ci`
+# inside the image; dist is rebuilt; .env* are local-only (and must never enter the image —
+# VITE_* come from build args). Test artifacts/e2e are irrelevant to the runtime image.
+node_modules
+dist
+.env
+.env.*
+test-results
+playwright-report
+e2e
+Dockerfile
+.dockerignore

@@ -1,0 +1,9 @@
+# Keep the BE build context small. bin/obj are rebuilt by `dotnet restore`/`publish` inside the
+# image; *.user are IDE files; TestResults is test output. The Api.Tests project is left in the
+# context (the Dockerfile only restores/publishes src/Api), but its build output is excluded.
+**/bin
+**/obj
+**/*.user
+**/TestResults
+Dockerfile
+.dockerignore
