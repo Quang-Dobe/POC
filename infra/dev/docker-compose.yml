@@ -1,0 +1,48 @@
+services:
+  backend:
+    build:
+      context: ../../POC.BFF
+      dockerfile: Dockerfile
+    image: poc-backend
+    environment:
+      ENV: DEV
+      ASPNETCORE_ENVIRONMENT: Development
+      BAO_TOKEN: ${BAO_TOKEN}
+      Auth__Authority: ${AUTH_AUTHORITY}
+      Vault__Address: ${VAULT_ADDRESS}
+      Cors__SpaOrigin: ${CORS_SPA_ORIGIN}
+      Agent__Host: ${AGENT_HOST}
+      Agent__Port: ${AGENT_PORT}
+      Session__RedisAddress: "redis:6379"
+      ASPNETCORE_URLS: https://+:8081
+      ASPNETCORE_Kestrel__Certificates__Default__Path: /certs/dev-tls.crt
+      ASPNETCORE_Kestrel__Certificates__Default__KeyPath: /certs/dev-tls.key
+    extra_hosts:
+      - "localhost:host-gateway"
+    depends_on:
+      - redis
+    ports:
+      - "${BE_PORT}:8081"
+    volumes:
+      - ./tls/certs:/certs:ro
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+
+  frontend:
+    build:
+      context: ../../POC.FE
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    image: poc-frontend
+    depends_on:
+      - backend
+    ports:
+      - "${FE_PORT}:443"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./tls/certs:/etc/nginx/certs:ro

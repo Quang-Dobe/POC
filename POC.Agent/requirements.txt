@@ -1,5 +1,6 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
+sse-starlette>=2.1.0
 PyJWT[crypto]>=2.9.0
 requests>=2.32.0
 azure-ai-projects>=1.0.0

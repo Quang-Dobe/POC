@@ -12,8 +12,8 @@
       "authentication": {
         "provider": "AzureAD",
         "jwt": {
-          "audience": "@env('AUTH_DAB_CLIENT_ID')",
-          "issuer": "@env('AUTH_AUTHORITY')"
+          "audience": "@env('AUTH_INTERNAL_AUDIENCE')",
+          "issuer": "@env('AUTH_INTERNAL_AUTHORITY')"
         }
       }
     }

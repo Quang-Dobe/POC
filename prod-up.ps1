@@ -31,7 +31,7 @@ function Start-Stack([string]$label, [string]$composeRel, [string[]]$extra) {
   Compose $composeRel (@("up", "-d", "--wait") + $extra)
   if ($LASTEXITCODE -ne 0) { throw "$label failed to start (exit $LASTEXITCODE)." }
 }
-Start-Stack "Backend + Frontend (app)" "POC.Authentication\infra\prod\docker-compose.yml" @("--build")
+Start-Stack "Backend + Frontend (app)" "infra\prod\docker-compose.yml" @("--build")
 
 # --- Agent Gateway (optional) ------------------------------------------------------------------
 if ($WithAgent -or ([Environment]::GetEnvironmentVariable("AGENT_GATEWAY_ENABLED", "Process") -eq "true")) {

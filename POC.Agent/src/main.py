@@ -1,19 +1,16 @@
 import logging
-import os
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
 
 logging.basicConfig(level=logging.INFO)
 _log = logging.getLogger("agent.auth")
 
 from .config import load_config
-from .auth import validate_token
-from .token_exchange import exchange_token
+from .auth import validate_token, ExternalTokenError, MalformedTokenError
 from .agent import make_project_client, make_openai_client
-from .runner import run_agent
+from .runner import run_agent, run_agent_stream
 
-# Loaded once at startup — no blocking network call during module load
 _config = load_config()
 _project = make_project_client(_config)
 _openai_client = make_openai_client(_project)
@@ -22,8 +19,6 @@ app = FastAPI()
 
 _IS_DEV = _config.environment == "Development"
 
-# One-shot startup dump of the (non-secret) auth params actually in effect.
-# Mismatched issuer vs JWKS source is the usual cause of /ask 401s.
 _log.info(
     "auth config: environment=%s issuer=%s audience=%s jwks_url=%s verify_ssl=%s",
     _config.environment,
@@ -44,11 +39,16 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/ask")
-def ask(body: AskRequest, request: Request):
+def _authenticate(request: Request, route: str) -> tuple[str, str]:
+    """Validate the inbound Bearer (the single internal token the BFF minted and forwarded):
+    401 on miss/external/malformed. Returns (api_role, token) where token IS the validated raw
+    bearer — the Agent forwards that same token verbatim to DAB (no exchange, no second header).
+    Raises HTTPException(401) on any failure — for the streaming path this runs in the handler
+    BEFORE the EventSourceResponse is constructed, so a pre-commit failure is a real HTTP 401,
+    never an SSE error event (§10.1: no token logged)."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        _log.warning("401 /ask: missing or non-Bearer Authorization header")
+        _log.warning("401 %s: missing or non-Bearer Authorization header", route)
         raise HTTPException(status_code=401, detail="Missing Bearer token")
 
     raw_token = auth_header[len("Bearer "):]
@@ -61,44 +61,78 @@ def ask(body: AskRequest, request: Request):
             verify_ssl=not _IS_DEV,
             jwks_url=_config.auth_jwks_url,
         )
-    except ValueError as exc:
-        # Log the concrete reason + the params used to validate, so a token/issuer/jwks
-        # mismatch is visible in container logs (the response only carries the short detail).
+    except ExternalTokenError as exc:
         _log.warning(
-            "401 /ask: token validation failed: %s | issuer=%s audience=%s jwks_url=%s",
+            "EXTERNAL_TOKEN_REJECTED no-fallback: 401 %s rejected an external/non-BE token | "
+            "reason=%s kid=%s token.iss=%s token.aud=%s jti=%s | expected.iss=%s expected.aud=%s",
+            route,
+            exc,
+            exc.kid,
+            exc.iss,
+            exc.aud,
+            exc.jti,
+            _config.auth_issuer,
+            _config.auth_audience,
+        )
+        raise HTTPException(status_code=401, detail=str(exc))
+    except MalformedTokenError as exc:
+        _log.warning(
+            "401 %s: token validation failed (malformed/expired): %s | issuer=%s audience=%s",
+            route,
             exc,
             _config.auth_issuer,
             _config.auth_audience,
-            _config.auth_jwks_url,
         )
         raise HTTPException(status_code=401, detail=str(exc))
 
     roles: list[str] = claims.get("roles", [])
     api_role = roles[0] if roles else "reader"
 
-    try:
-        dab_token = exchange_token(raw_token, _config)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Token exchange failed: {exc}")
+    return api_role, raw_token
+
+
+@app.post("/ask")
+def ask(body: AskRequest, request: Request):
+    api_role, token = _authenticate(request, "/ask")
 
     try:
         answer, session_id = run_agent(
             _openai_client,
             body.question,
             body.session_id,
-            dab_token,
+            token,
             api_role,
             _config,
         )
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail=str(exc))
     except Exception as exc:
-        # Full traceback to the container log — the response only carries the short detail,
-        # which hides where in the tool loop / DAB call it actually broke.
         _log.exception("500 /ask: agent run failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Agent error: {exc}")
 
     return {"answer": answer, "session_id": session_id}
+
+
+@app.post("/ask/stream")
+def ask_stream(body: AskRequest, request: Request):
+    api_role, token = _authenticate(request, "/ask/stream")
+
+    def _event_stream():
+        try:
+            for chunk in run_agent_stream(
+                _openai_client,
+                body.question,
+                body.session_id,
+                token,
+                api_role,
+                _config,
+            ):
+                yield {"data": chunk}
+        except Exception as exc:
+            _log.exception("/ask/stream: agent stream failed mid-flight: %s", exc)
+            return
+
+    return EventSourceResponse(_event_stream())
 
 
 if __name__ == "__main__":

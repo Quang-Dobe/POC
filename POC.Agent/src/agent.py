@@ -3,7 +3,6 @@ from azure.identity import ClientSecretCredential
 from azure.ai.projects import AIProjectClient
 from .config import Config
 
-# Tool schema sent to the model on every request.
 QUERY_DAB_TOOL_DEF = {
     "type": "function",
     "function": {

@@ -13,7 +13,7 @@ $downArgs = $Volumes ? @("down", "-v") : @("down")
 
 foreach ($f in @(
   "POC.Agent\docker-compose.yml",
-  "POC.Authentication\infra\dev\docker-compose.yml",
+  "infra\dev\docker-compose.yml",
   "POC.KeyCloak\docker-compose.yml",
   "POC.OpenBao\docker-compose.yml"
 )) {

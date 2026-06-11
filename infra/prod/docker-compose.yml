@@ -1,0 +1,37 @@
+services:
+  backend:
+    build:
+      context: ../../POC.BFF
+      dockerfile: Dockerfile
+    image: poc-backend
+    environment:
+      ENV: PROD
+      ASPNETCORE_URLS: http://+:8081
+      ASPNETCORE_ENVIRONMENT: Production
+      Auth__Authority: ${AUTH_AUTHORITY}
+      Cors__SpaOrigin: ${CORS_SPA_ORIGIN}
+      KeyVault__VaultUri: ${KEYVAULT_VAULT_URI}
+      AZURE_TENANT_ID: ${TENANT_ID}
+      AZURE_CLIENT_ID: ${AUTH_API_CLIENT_ID}
+      AZURE_CLIENT_SECRET: ${AUTH_API_CLIENT_SECRET}
+      Agent__Host: ${AGENT_HOST}
+      Agent__Port: ${AGENT_PORT}
+      Session__RedisAddress: ${REDIS_ADDRESS}
+    extra_hosts:
+      - "localhost:host-gateway"
+    ports:
+      - "${BE_PORT}:8081"
+
+  frontend:
+    build:
+      context: ../../POC.FE
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+    image: poc-frontend-prod
+    depends_on:
+      - backend
+    ports:
+      - "${FE_PORT}:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro

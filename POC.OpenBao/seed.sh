@@ -33,9 +33,35 @@ until wget -q -O /dev/null "${BAO_ADDR}/v1/sys/health"; do
 done
 echo "seed: OpenBAO is up."
 
-# KV v2 is auto-mounted at secret/ in dev mode.
-# Placeholder value — DEV only, non-secret, non-empty.
-bao kv put secret/poc \
-  "Message--DisplayString=Hello from OpenBAO (DEV)"
+# The BE IDP-Simulator signs downstream tokens with an RSA-2048 private key it loads from the
+# secret store (IdpSimulator:SigningKeyPem, in RequiredKeys — the backend refuses to start without
+# it). Generate a fresh PKCS#8 key at seed time (DEV only, NEVER committed — same no-PEM-in-repo
+# posture as the test suite) and write it alongside the message placeholder. openssl emits the
+# exact PKCS#8 shape SigningKeyProvider pins to RSA.ImportFromPem.
+if ! command -v openssl >/dev/null 2>&1; then
+  apk add --no-cache openssl >/dev/null 2>&1 || {
+    echo "seed: openssl is required to generate the DEV signing key but is unavailable." >&2
+    exit 1
+  }
+fi
+openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/idp-signing.key 2>/dev/null
+echo "seed: generated a DEV RSA-2048 signing key (not persisted to the repo)."
 
-echo "seed: wrote Message--DisplayString to secret/poc."
+# Task 2: DataProtection master STRING secret. RequiredKeys includes DataProtection:MasterKey, so the
+# backend fail-fasts at boot without it. The AES-256-GCM key that encrypts the Data Protection key-ring
+# before it lands in Redis is HKDF-derived from this string. Generate a fresh 64-hex DEV value (>=32
+# chars) at seed time (DEV only, NEVER committed).
+DP_MASTER_KEY="$(openssl rand -hex 32)"
+
+# KV v2 is auto-mounted at secret/ in dev mode. ONE put writes ALL keys — each `put` REPLACES the whole
+# secret/poc object, so a later/split put would clobber the PEM. Message--DisplayString is a non-secret
+# DEV placeholder; the PEM is read from the temp file via @; Keycloak--AdminClientSecret (Task 3) is the
+# poc-admin-cli DEV secret mirrored from realm-export.json so the Keycloak Admin REST invite flow works.
+bao kv put secret/poc \
+  "Message--DisplayString=Hello from OpenBAO (DEV)" \
+  "IdpSimulator--SigningKeyPem=@/tmp/idp-signing.key" \
+  "DataProtection--MasterKey=${DP_MASTER_KEY}" \
+  "Keycloak--AdminClientSecret=poc-admin-cli-dev-secret"
+
+rm -f /tmp/idp-signing.key
+echo "seed: wrote Message--DisplayString + IdpSimulator--SigningKeyPem + DataProtection--MasterKey + Keycloak--AdminClientSecret to secret/poc."

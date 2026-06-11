@@ -1,13 +1,13 @@
 # POC.OpenBao — DEV secret store
 
-OpenBAO (dev mode, KV v2) plus a one-shot seed that writes the secret the backend fail-fasts
+OpenBAO (dev mode, KV v2) plus a one-shot seed that writes the secrets the backend fail-fasts
 on. Acts as the local DEV stand-in for Azure Key Vault. Moved out of
-`POC.Authentication/infra/dev` on 2026-06-08 into its own project.
+`infra/dev` on 2026-06-08 into its own project.
 
 ```
 POC.OpenBao/
   docker-compose.yml    # openbao (dev mode) + openbao-seed (one-shot)
-  seed.sh               # writes Message--DisplayString to secret/poc
+  seed.sh               # writes Message--DisplayString + IdpSimulator--SigningKeyPem to secret/poc
   .gitattributes        # force LF on *.sh
 ```
 
@@ -28,7 +28,7 @@ docker compose -f POC.OpenBao/docker-compose.yml --env-file .env.dev up
 |---|---|
 | URL | http://localhost:${OPENBAO_PORT} (default 8200; dev mode, KV v2 at `secret/`) |
 | Root token | `BAO_TOKEN` from the root `.env.dev` (DEV-only placeholder) |
-| Seeded path | `secret/poc` → `Message--DisplayString` |
+| Seeded path | `secret/poc` → `Message--DisplayString`, `IdpSimulator--SigningKeyPem` |
 
 ## `BAO_TOKEN` — single source, no drift
 
@@ -36,12 +36,22 @@ The backend authenticates to this store with the **same** `BAO_TOKEN`. It now li
 **one** place — the root `POC/.env.dev` — read by both the store and the backend, so the two can never
 fall out of sync.
 
-## Seed values (DEV-only, non-secret)
+## Seed values (DEV-only)
 
-`seed.sh` writes `Message--DisplayString` under the Key Vault `--` naming
-(the backend's `OpenBaoSecretStoreReader` maps `--` → `:` so config keys match PROD). The value is
-a non-secret DEV placeholder, intentionally **non-empty** — the backend rejects empty secrets and
-refuses to start.
+`seed.sh` writes **two** secrets to `secret/poc` in a single `kv put`, both under the Key Vault `--`
+naming (the backend's `OpenBaoSecretStoreReader` maps `--` → `:` so config keys match PROD):
+
+- **`Message--DisplayString`** → `Message:DisplayString`. A non-secret DEV placeholder, intentionally
+  **non-empty** — the backend rejects empty secrets and refuses to start.
+- **`IdpSimulator--SigningKeyPem`** → `IdpSimulator:SigningKeyPem`. The RSA-2048 PKCS#8 private key the
+  BFF (BE IDP-Simulator) uses to sign its minted RS256 downstream tokens. `IdpSimulator:SigningKeyPem`
+  is in the backend's `RequiredKeys`, so the backend refuses to start without it. `seed.sh` **generates
+  a fresh key at seed time** (`openssl genpkey`) — it is **never committed to the repo**, the same
+  no-PEM-in-repo posture as the test suite. The seed container needs `openssl`; `seed.sh` runs
+  `apk add --no-cache openssl` if it is missing.
+
+PROD does not use OpenBAO — it reads the same logical secrets from **Azure Key Vault**, where the signing
+key PEM lives under the same `IdpSimulator--SigningKeyPem` name.
 
 ## Why these settings (do not "fix" them)
 

@@ -2,13 +2,38 @@ import logging
 import ssl
 import jwt
 from jwt import PyJWKClient
-import requests
+from jwt.exceptions import PyJWKClientError
 
 _log = logging.getLogger("agent.auth")
 
-# Module-level caches — one JWKS client per resolved JWKS URI per process.
-_jwks_uris: dict[str, str] = {}
 _jwks_clients: dict[str, PyJWKClient] = {}
+
+
+class TokenValidationError(ValueError):
+    """Base for all token validation failures. Carries the best-effort claims/header
+    introspection (kid/iss/aud/jti) so the caller can emit a loud rejection marker
+    without ever touching the token string itself (§10.1 — never log the token)."""
+
+    def __init__(self, message: str, kid: str | None = None,
+                 iss: str | None = None, aud=None, jti: str | None = None):
+        super().__init__(message)
+        self.kid = kid
+        self.iss = iss
+        self.aud = aud
+        self.jti = jti
+
+
+class ExternalTokenError(TokenValidationError):
+    """The token failed at the trust boundary that an external-IDP (Entra/KeyCloak)
+    token hits first: unknown/absent signing key (unknown kid), bad signature, wrong
+    issuer, or wrong audience. This is the E2E-6 class — a token that is NOT BE-minted.
+    The caller emits the grep-able 'no-fallback' rejection marker for this class only."""
+
+
+class MalformedTokenError(TokenValidationError):
+    """The token is structurally broken (not a decodable JWT) or carries an expired
+    BE signature. This is a DISTINCT, non-external class: an expired BE token is a
+    real BE token, not the external token E2E-6 asserts rejection of."""
 
 
 def _unverified_ssl_ctx() -> ssl.SSLContext:
@@ -18,25 +43,11 @@ def _unverified_ssl_ctx() -> ssl.SSLContext:
     return ctx
 
 
-def _get_jwks_client(issuer: str, verify_ssl: bool = True, jwks_url: str | None = None) -> PyJWKClient:
-    if jwks_url:
-        # Skip OIDC discovery — use the supplied JWKS URL directly.
-        effective_uri = jwks_url
-    else:
-        if issuer not in _jwks_uris:
-            resp = requests.get(
-                f"{issuer}/.well-known/openid-configuration",
-                verify=verify_ssl,
-                timeout=10,
-            )
-            resp.raise_for_status()
-            _jwks_uris[issuer] = resp.json()["jwks_uri"]
-        effective_uri = _jwks_uris[issuer]
-
-    if effective_uri not in _jwks_clients:
+def _get_jwks_client(jwks_url: str, verify_ssl: bool = True) -> PyJWKClient:
+    if jwks_url not in _jwks_clients:
         ssl_ctx = None if verify_ssl else _unverified_ssl_ctx()
-        _jwks_clients[effective_uri] = PyJWKClient(effective_uri, ssl_context=ssl_ctx)
-    return _jwks_clients[effective_uri]
+        _jwks_clients[jwks_url] = PyJWKClient(jwks_url, ssl_context=ssl_ctx)
+    return _jwks_clients[jwks_url]
 
 
 def validate_token(
@@ -46,26 +57,45 @@ def validate_token(
     verify_ssl: bool = True,
     jwks_url: str | None = None,
 ) -> dict:
-    # Dump what the token actually claims (unverified) vs what we'll enforce — the
-    # fastest way to spot an issuer/audience/kid mismatch in the logs.
+    kid: str | None = None
+    token_iss: str | None = None
+    token_aud = None
+    token_jti: str | None = None
     try:
         header = jwt.get_unverified_header(token)
         unverified = jwt.decode(token, options={"verify_signature": False})
+        kid = header.get("kid")
+        token_iss = unverified.get("iss")
+        token_aud = unverified.get("aud")
+        token_jti = unverified.get("jti")
         _log.info(
-            "token introspection: kid=%s alg=%s token.iss=%s token.aud=%s | expected.iss=%s expected.aud=%s",
-            header.get("kid"),
+            "token introspection: kid=%s alg=%s token.iss=%s token.aud=%s jti=%s | expected.iss=%s expected.aud=%s",
+            kid,
             header.get("alg"),
-            unverified.get("iss"),
-            unverified.get("aud"),
+            token_iss,
+            token_aud,
+            token_jti,
             issuer,
             audience,
         )
-    except Exception as exc:  # malformed token — keep going, decode below raises the real error
+    except Exception as exc:
         _log.warning("token introspection failed (malformed token?): %s", exc)
 
-    client = _get_jwks_client(issuer, verify_ssl, jwks_url)
+    client = _get_jwks_client(jwks_url or issuer, verify_ssl)
     try:
         signing_key = client.get_signing_key_from_jwt(token)
+    except PyJWKClientError as exc:
+        raise ExternalTokenError(
+            f"Signing key not found (unknown kid): {exc}",
+            kid=kid, iss=token_iss, aud=token_aud, jti=token_jti,
+        ) from exc
+    except jwt.InvalidTokenError as exc:
+        raise MalformedTokenError(
+            f"Invalid token: {exc}",
+            kid=kid, iss=token_iss, aud=token_aud, jti=token_jti,
+        ) from exc
+
+    try:
         return jwt.decode(
             token,
             signing_key.key,
@@ -73,7 +103,18 @@ def validate_token(
             audience=audience,
             issuer=issuer,
         )
-    except jwt.ExpiredSignatureError:
-        raise ValueError("Token expired")
-    except (jwt.InvalidTokenError, Exception) as exc:
-        raise ValueError(f"Invalid token: {exc}") from exc
+    except jwt.ExpiredSignatureError as exc:
+        raise MalformedTokenError(
+            "Token expired",
+            kid=kid, iss=token_iss, aud=token_aud, jti=token_jti,
+        ) from exc
+    except (jwt.InvalidSignatureError, jwt.InvalidIssuerError, jwt.InvalidAudienceError) as exc:
+        raise ExternalTokenError(
+            f"Invalid token (external/non-BE): {exc}",
+            kid=kid, iss=token_iss, aud=token_aud, jti=token_jti,
+        ) from exc
+    except jwt.InvalidTokenError as exc:
+        raise MalformedTokenError(
+            f"Invalid token: {exc}",
+            kid=kid, iss=token_iss, aud=token_aud, jti=token_jti,
+        ) from exc

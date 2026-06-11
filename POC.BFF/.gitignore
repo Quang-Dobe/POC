@@ -1,0 +1,10 @@
+# ---- .NET ----
+bin/
+obj/
+*.user
+
+# ---- Environment files (templates only; never commit real values) ----
+.env
+.env.*
+!*.env.example
+!.env.example

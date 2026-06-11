@@ -2,8 +2,8 @@
   dev-up.ps1 — start the local DEV stack in DEPENDENCY ORDER, each from its own sub-repo compose:
       OpenBAO (secret store) -> Keycloak (identity) -> Backend + Frontend (app) -> [Agent Gateway] -> [POC.DAB DEV]
 
-  The infra/dev umbrella was removed (2026-06-08): `docker compose` inside POC.Authentication now
-  starts ONLY the app. This script is the single place that brings the whole DEV stack up in order.
+  The infra/dev umbrella was removed (2026-06-08): `docker compose` inside infra/dev now
+  starts ONLY the app (BE/FE). This script is the single place that brings the whole DEV stack up in order.
 
   Usage:
     .\dev-up.ps1            # docker stacks only (OpenBAO + Keycloak + BE/FE)
@@ -25,6 +25,39 @@ if (-not (Test-Path $envFile)) {
 
 function Compose([string]$composeRel, [string[]]$cmdArgs) {
   docker compose -f (Join-Path $root $composeRel) --env-file $envFile @cmdArgs
+}
+
+# --- TLS cert: keep the mounted PEM in lockstep with the TRUSTED dev cert ----------------
+# DAB runs on the host and fetches the BFF's OIDC metadata over https://localhost:5000,
+# validating the served cert against the host trust store. If the mounted PEM drifts from
+# the trusted dev cert (e.g. the dev cert was regenerated), DAB's metadata fetch fails ->
+# no JWKS -> every token is rejected 401. So compare thumbprints every run, not just presence.
+$certDir  = Join-Path $root "infra\dev\tls\certs"
+$certFile = Join-Path $certDir "dev-tls.crt"
+$keyFile  = Join-Path $certDir "dev-tls.key"
+New-Item -ItemType Directory -Force $certDir | Out-Null
+
+# Idempotent: a no-op (no UAC prompt) when the dev cert is already trusted.
+dotnet dev-certs https --trust | Out-Null
+if ($LASTEXITCODE -ne 0) { throw "dotnet dev-certs --trust failed." }
+
+$check        = dotnet dev-certs https --check --trust 2>&1 | Out-String
+$trustedThumb = ([regex]::Match($check, '([0-9A-Fa-f]{40})')).Value
+
+$mountedThumb = ''
+if ((Test-Path $certFile) -and (Test-Path $keyFile)) {
+  try {
+    $mountedThumb = [System.Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPem((Get-Content $certFile -Raw)).Thumbprint
+  } catch { $mountedThumb = '' }
+}
+
+if ($mountedThumb -and ($mountedThumb -eq $trustedThumb)) {
+  Write-Host "==> TLS cert in sync with trusted dev cert ($trustedThumb)" -ForegroundColor DarkGray
+} else {
+  Write-Host "==> TLS cert missing/stale (mounted=$mountedThumb trusted=$trustedThumb) — re-exporting" -ForegroundColor Cyan
+  dotnet dev-certs https -ep $certFile --format pem --no-password
+  if ($LASTEXITCODE -ne 0) { throw "dotnet dev-certs export failed." }
+  Write-Host "    Re-exported trusted cert to $certFile (recreate the BFF/FE containers to load it)" -ForegroundColor Green
 }
 
 # Order matters: the backend fail-fasts on an unreachable store and 401s without Keycloak's JWKS.
@@ -52,7 +85,7 @@ function Start-Stack([string]$label, [string]$composeRel, [string[]]$extra) {
   if ($LASTEXITCODE -ne 0) { throw "$label failed to start (exit $LASTEXITCODE)." }
 }
 Start-Stack "Keycloak (identity)     :8080 https" "POC.KeyCloak\docker-compose.yml" @()
-Start-Stack "Backend + Frontend (app)"            "POC.Authentication\infra\dev\docker-compose.yml" @("--build")
+Start-Stack "Backend + Frontend (app)"            "infra\dev\docker-compose.yml" @("--build")
 
 # --- Agent Gateway (optional) ------------------------------------------------------------------
 if ($WithAgent -or ([Environment]::GetEnvironmentVariable("AGENT_GATEWAY_ENABLED", "Process") -eq "true")) {
@@ -61,18 +94,18 @@ if ($WithAgent -or ([Environment]::GetEnvironmentVariable("AGENT_GATEWAY_ENABLED
 
 Write-Host ""
 Write-Host "DEV docker stack is UP:" -ForegroundColor Green
-Write-Host "  Frontend  http://localhost:5173"
-Write-Host "  Backend   http://localhost:5000   (/ liveness, /api/message gated)"
+Write-Host "  Frontend  https://localhost:5173"
+Write-Host "  Backend   https://localhost:5000   (/ liveness, /api/message gated)"
 Write-Host "  Keycloak  https://localhost:8080  (realm poc, admin/admin)"
 Write-Host "  OpenBAO   http://localhost:8200"
 if ($WithAgent -or ([Environment]::GetEnvironmentVariable("AGENT_GATEWAY_ENABLED", "Process") -eq "true")) {
   Write-Host "  Agent GW  http://localhost:8082  (POST /ask, GET /health)"
 }
-Write-Host "  DEV e2e:  cd POC.Authentication\frontend; npx playwright test"
+Write-Host "  FE tests: cd POC.FE; npm test"
 
 if ($WithDab) {
   Write-Host ""
-  Write-Host "==> POC.DAB (DEV, host process — interactive Fabric auth opens a browser)" -ForegroundColor Cyan
+  Write-Host "==> POC.DAB (DEV, host process - interactive Fabric auth opens a browser)" -ForegroundColor Cyan
   Get-Content $envFile | ForEach-Object {
     $line = $_.Trim()
     if ($line -and -not $line.StartsWith('#') -and $line.Contains('=')) {
