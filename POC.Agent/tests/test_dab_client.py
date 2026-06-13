@@ -12,17 +12,10 @@ def _ok_response(data):
 
 
 def _called_url(mock_get):
-    """The positional URL argument query_dab passes to requests.get.
-
-    dab_client.query_dab deliberately builds the OData query string INTO the URL (with $ unencoded
-    and spaces as %20) because DAB rejects the %24/+ encoding the default params= path produces
-    (see src/dab_client.py:28-34). So the assertions read the URL, NOT a params= kwarg.
-    """
     return mock_get.call_args[0][0]
 
 
 def _query_params(url):
-    """Parse the query string off the built URL back into a name->value dict for assertions."""
     query = urllib.parse.urlsplit(url).query
     return dict(urllib.parse.parse_qsl(query))
 

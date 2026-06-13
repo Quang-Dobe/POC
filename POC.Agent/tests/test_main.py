@@ -114,9 +114,6 @@ def test_no_exchange_token_symbol_remains():
 
 
 def _data_frames(sse_text: str) -> list[str]:
-    """Reassemble the chunk each SSE frame carries the way BE's parser does
-    (AgentGatewayClient: accumulate consecutive `data:` lines, rejoin on \\n, flush on blank
-    line). Returns one reconstructed chunk per frame — so framing can be asserted exactly."""
     frames: list[str] = []
     current: list[str] = []
     for raw in sse_text.split("\n"):

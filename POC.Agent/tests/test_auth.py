@@ -1,14 +1,3 @@
-"""Real-crypto unit tests for src.auth (Step G, decision Q6).
-
-These tests generate an RSA keypair AT RUNTIME and mint test tokens with PyJWT, then let the
-REAL jwt.decode enforce issuer/audience/signature. No PEM is committed. The JWKS client is stubbed
-to return the runtime public key for the matching kid, so an unknown-kid token (signed by a second
-runtime key the stub does not know) exercises the real PyJWKClientError path — the most common
-E2E-6 reject path, which fails at get_signing_key_from_jwt BEFORE iss/aud are ever checked.
-
-This UPGRADES the old suite that patched src.auth.jwt.decode and therefore asserted nothing about
-real issuer/audience enforcement.
-"""
 import time
 import jwt
 import pytest
@@ -52,9 +41,6 @@ def _mint_token(private_key, kid, *, iss=BE_ISSUER, aud=BE_AUDIENCE, exp_offset=
 
 
 class _StubJwksClient:
-    """Stands in for PyJWKClient: maps known kids to their public key, raises the real
-    PyJWKClientError for an unknown kid (the genuine external-token reject path)."""
-
     def __init__(self, keys_by_kid):
         self._keys_by_kid = keys_by_kid
 

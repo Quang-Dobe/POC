@@ -1,57 +1,80 @@
 # POC.OpenBao — DEV secret store
 
-OpenBAO (dev mode, KV v2) plus a one-shot seed that writes the secrets the backend fail-fasts
-on. Acts as the local DEV stand-in for Azure Key Vault. Moved out of
-`infra/dev` on 2026-06-08 into its own project.
+OpenBAO (HashiCorp Vault fork) running in **dev mode** with **KV v2**, plus a one-shot seed
+container that writes the secrets the BFF fail-fasts on at boot. This is the local DEV stand-in
+for Azure Key Vault (used in PROD).
 
 ```
 POC.OpenBao/
   docker-compose.yml    # openbao (dev mode) + openbao-seed (one-shot)
-  seed.sh               # writes Message--DisplayString + IdpSimulator--SigningKeyPem to secret/poc
+  seed.sh               # writes the secret/poc keys (see below)
   .gitattributes        # force LF on *.sh
 ```
 
 Env vars (`BAO_TOKEN`, `OPENBAO_PORT`) come from the **root `.env.dev`** (`POC/.env.dev`) — see
-[../.env.example](../.env.example). There is no per-project `.env` anymore.
+[../.env.example](../.env.example).
 
 ## Run
 
 ```sh
-# Standalone (run from the POC root so --env-file resolves):
+# Run from the POC root so --env-file resolves:
 docker compose -f POC.OpenBao/docker-compose.yml --env-file .env.dev up
-
-# As part of the full DEV stack — the root dev-up.ps1 starts this FIRST (OpenBAO -> Keycloak -> app),
-# passing --env-file .env.dev.
 ```
+
+The compose file starts two services:
+
+| Service | Role |
+|---|---|
+| `openbao` | dev-mode server, root token = `BAO_TOKEN`, listens on `0.0.0.0:8200` inside the container |
+| `openbao-seed` | one-shot; waits for `openbao` to be healthy, then runs `seed.sh` and exits |
 
 | What | Value |
 |---|---|
-| URL | http://localhost:${OPENBAO_PORT} (default 8200; dev mode, KV v2 at `secret/`) |
+| URL | `http://localhost:${OPENBAO_PORT}` (default `8200`; dev mode, KV v2 mounted at `secret/`) |
 | Root token | `BAO_TOKEN` from the root `.env.dev` (DEV-only placeholder) |
-| Seeded path | `secret/poc` → `Message--DisplayString`, `IdpSimulator--SigningKeyPem` |
+| Seeded path | `secret/poc` (KV v2 → read at `secret/data/poc`) |
 
-## `BAO_TOKEN` — single source, no drift
+## What `seed.sh` provisions
 
-The backend authenticates to this store with the **same** `BAO_TOKEN`. It now lives in exactly
-**one** place — the root `POC/.env.dev` — read by both the store and the backend, so the two can never
-fall out of sync.
+`seed.sh` writes **four** keys to `secret/poc` in a single `bao kv put` (one put replaces the whole
+object, so all keys must be written together). Keys use the Azure Key Vault `--` naming so the BFF's
+key mapping (`--` → `:`) yields the same config keys as PROD:
 
-## Seed values (DEV-only)
+| Store key (`secret/poc`) | Config key | Value (DEV) |
+|---|---|---|
+| `Message--DisplayString` | `Message:DisplayString` | Non-secret placeholder string (`Hello from OpenBAO (DEV)`) |
+| `IdpSimulator--SigningKeyPem` | `IdpSimulator:SigningKeyPem` | Fresh RSA-2048 PKCS#8 private key, generated at seed time via `openssl genpkey` |
+| `DataProtection--MasterKey` | `DataProtection:MasterKey` | Fresh 64-hex value via `openssl rand -hex 32` |
+| `Keycloak--AdminClientSecret` | `Keycloak:AdminClientSecret` | `poc-admin-cli-dev-secret` (mirrors the DEV realm export) |
 
-`seed.sh` writes **two** secrets to `secret/poc` in a single `kv put`, both under the Key Vault `--`
-naming (the backend's `OpenBaoSecretStoreReader` maps `--` → `:` so config keys match PROD):
+All values are **DEV-only**. The RSA key and Data Protection master key are **generated fresh at seed
+time and never committed** to the repo. The seed container installs `openssl` via `apk add` if it is
+missing.
 
-- **`Message--DisplayString`** → `Message:DisplayString`. A non-secret DEV placeholder, intentionally
-  **non-empty** — the backend rejects empty secrets and refuses to start.
-- **`IdpSimulator--SigningKeyPem`** → `IdpSimulator:SigningKeyPem`. The RSA-2048 PKCS#8 private key the
-  BFF (BE IDP-Simulator) uses to sign its minted RS256 downstream tokens. `IdpSimulator:SigningKeyPem`
-  is in the backend's `RequiredKeys`, so the backend refuses to start without it. `seed.sh` **generates
-  a fresh key at seed time** (`openssl genpkey`) — it is **never committed to the repo**, the same
-  no-PEM-in-repo posture as the test suite. The seed container needs `openssl`; `seed.sh` runs
-  `apk add --no-cache openssl` if it is missing.
+## How the BFF reads these secrets
 
-PROD does not use OpenBAO — it reads the same logical secrets from **Azure Key Vault**, where the signing
-key PEM lives under the same `IdpSimulator--SigningKeyPem` name.
+The BFF reads this store at startup through `Poc.Bff.Infrastructure.Secrets.OpenBaoSecretStoreReader`:
+
+1. Authenticates with token auth using the `BAO_TOKEN` env var.
+2. Reads KV v2 at mount `secret`, path `poc` (i.e. `secret/data/poc`).
+3. Maps each store key `--` → `:` (`SecretKeyMapping`) and loads them into configuration.
+
+The server address comes from config `Vault:Address`. `BAO_TOKEN` is shared by both this store and the
+BFF and lives in exactly **one** place — the root `POC/.env.dev` — so the two cannot drift.
+
+The BFF refuses to start unless these **required** config keys are present and non-empty
+(`SecretStoreConfiguration.RequiredKeys`):
+
+- `Message:DisplayString`
+- `IdpSimulator:SigningKeyPem`
+- `DataProtection:MasterKey`
+
+(`Keycloak:AdminClientSecret` is seeded but is not in the required set.)
+
+## PROD
+
+PROD does not use OpenBAO. The BFF reads the same logical secrets from **Azure Key Vault**
+(`KeyVaultSecretStoreReader`, selected when `ENV=PROD`), where they live under the same `--` names.
 
 ## Why these settings (do not "fix" them)
 

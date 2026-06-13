@@ -1,9 +1,3 @@
-<#
-  prod-down.ps1 — stop the local PROD docker stack (Agent -> app).
-  PROD has no local Keycloak/OpenBAO (Azure AD + Key Vault), so only app + Agent are stopped here.
-  POC.DAB PROD is a host process (`dab start`) — stop it with Ctrl+C in its own window.
-  Pass -Volumes to also wipe volumes.
-#>
 param([switch]$Volumes)
 
 $ErrorActionPreference = "Continue"

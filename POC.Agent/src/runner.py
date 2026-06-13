@@ -25,13 +25,6 @@ def _append_tool_round(
     token: str,
     api_role: str,
 ) -> None:
-    """Append the assistant's tool-call message plus each tool result, in place.
-
-    Shared by run_agent (non-streaming) and run_agent_stream so the tool loop has ONE
-    implementation. `msg` carries the reassembled tool_calls (each with .id and
-    .function.name/.arguments). Each call is executed against DAB and its result is
-    appended as a tool message keyed by the originating tool_call_id.
-    """
     messages.append({
         "role": "assistant",
         "content": msg.content,
@@ -59,9 +52,6 @@ def run_agent(
     api_role: str,
     config: Config,
 ) -> tuple[str, str]:
-    """Non-streaming /ask path. UNCHANGED contract (architect Q2): the exact
-    non-streaming chat.completions.create call and the (answer, session_id) return tuple
-    are preserved verbatim — the live /ask path is not flipped to streaming mode."""
     messages = _initial_messages(question)
 
     for _ in range(_MAX_TOOL_ROUNDS):
@@ -83,15 +73,6 @@ def run_agent(
 
 
 class _ToolCallAccumulator:
-    """Reassembles a streamed tool_call from its per-chunk deltas (architect Q1).
-
-    OpenAI streams a tool_call across many chunks: the first delta carries the id +
-    function.name and an arguments fragment; later deltas carry only more of the arguments
-    string. They are keyed by `index` within one round. `.function.name`/`.arguments`/`.id`
-    expose the same surface run_agent's non-streaming `msg.tool_calls` entries do, so
-    `_append_tool_round` consumes either shape unchanged.
-    """
-
     def __init__(self) -> None:
         self.id: str | None = None
         self._name: str = ""
@@ -121,10 +102,6 @@ class _ToolCallAccumulator:
 
 
 class _StreamedAssistantMessage:
-    """The reassembled assistant message for one streamed round: its accumulated content
-    and the reassembled tool_calls (ordered by their streaming index). Exposes `.content`
-    and `.tool_calls`, the exact surface `_append_tool_round` reads."""
-
     def __init__(self, content: str | None, tool_calls: list[_ToolCallAccumulator]) -> None:
         self.content = content
         self.tool_calls = tool_calls
@@ -138,12 +115,6 @@ def run_agent_stream(
     api_role: str,
     config: Config,
 ) -> Iterator[str]:
-    """Streaming /ask/stream path (architect Q1/Q2). NET-NEW generator beside run_agent —
-    it does not touch the non-streaming path. stream=True on EVERY model round; per round
-    the tool_call deltas are reassembled and any non-empty delta.content string is yielded
-    as it arrives. Tool-call rounds carry no user-visible content, so nothing leaks before
-    the tool runs. The shared tool loop and the _MAX_TOOL_ROUNDS non-convergence guard are
-    identical to run_agent."""
     messages = _initial_messages(question)
 
     for _ in range(_MAX_TOOL_ROUNDS):

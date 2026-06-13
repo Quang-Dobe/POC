@@ -1,19 +1,3 @@
-<#
-  dev-up.ps1 — start the local DEV stack in DEPENDENCY ORDER, each from its own sub-repo compose:
-      OpenBAO (secret store) -> Keycloak (identity) -> Backend + Frontend (app) -> [Agent Gateway] -> [POC.DAB DEV]
-
-  The infra/dev umbrella was removed (2026-06-08): `docker compose` inside infra/dev now
-  starts ONLY the app (BE/FE). This script is the single place that brings the whole DEV stack up in order.
-
-  Usage:
-    .\dev-up.ps1            # docker stacks only (OpenBAO + Keycloak + BE/FE)
-    .\dev-up.ps1 -WithDab   # also launch POC.DAB on the host (`dab start`; needs Fabric + a browser)
-    .\dev-up.ps1 -WithAgent   # also start Agent Gateway container (needs Azure creds in .env.dev)
-
-  Prereqs (one-time): copy .env.example -> .env.dev (root) and generate the Keycloak dev cert:
-    Copy-Item .env.example .env.dev
-    dotnet dev-certs https -ep POC.KeyCloak\certs\dev-cert.pfx -p changeit
-#>
 param([switch]$WithDab, [switch]$WithAgent)
 
 $ErrorActionPreference = "Stop"
@@ -27,17 +11,11 @@ function Compose([string]$composeRel, [string[]]$cmdArgs) {
   docker compose -f (Join-Path $root $composeRel) --env-file $envFile @cmdArgs
 }
 
-# --- TLS cert: keep the mounted PEM in lockstep with the TRUSTED dev cert ----------------
-# DAB runs on the host and fetches the BFF's OIDC metadata over https://localhost:5000,
-# validating the served cert against the host trust store. If the mounted PEM drifts from
-# the trusted dev cert (e.g. the dev cert was regenerated), DAB's metadata fetch fails ->
-# no JWKS -> every token is rejected 401. So compare thumbprints every run, not just presence.
 $certDir  = Join-Path $root "infra\dev\tls\certs"
 $certFile = Join-Path $certDir "dev-tls.crt"
 $keyFile  = Join-Path $certDir "dev-tls.key"
 New-Item -ItemType Directory -Force $certDir | Out-Null
 
-# Idempotent: a no-op (no UAC prompt) when the dev cert is already trusted.
 dotnet dev-certs https --trust | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "dotnet dev-certs --trust failed." }
 
@@ -60,11 +38,6 @@ if ($mountedThumb -and ($mountedThumb -eq $trustedThumb)) {
   Write-Host "    Re-exported trusted cert to $certFile (recreate the BFF/FE containers to load it)" -ForegroundColor Green
 }
 
-# Order matters: the backend fail-fasts on an unreachable store and 401s without Keycloak's JWKS.
-
-# --- OpenBAO -------------------------------------------------------------------------------------
-# Has a one-shot `openbao-seed` that EXITS 0 — `up --wait` mis-reports that exit as a failure, so
-# start detached and poll explicitly for openbao healthy + seed exited 0.
 Write-Host "==> OpenBAO (secret store)  :8200" -ForegroundColor Cyan
 Compose "POC.OpenBao\docker-compose.yml" @("up", "-d")
 if ($LASTEXITCODE -ne 0) { throw "OpenBAO failed to start." }
@@ -77,8 +50,6 @@ while ($true) {
   Start-Sleep -Seconds 3
 }
 
-# --- Keycloak + app ------------------------------------------------------------------------------
-# No one-shot containers here, so `up --wait` is safe (waits for healthy / running).
 function Start-Stack([string]$label, [string]$composeRel, [string[]]$extra) {
   Write-Host "==> $label" -ForegroundColor Cyan
   Compose $composeRel (@("up", "-d", "--wait") + $extra)
@@ -87,7 +58,6 @@ function Start-Stack([string]$label, [string]$composeRel, [string[]]$extra) {
 Start-Stack "Keycloak (identity)     :8080 https" "POC.KeyCloak\docker-compose.yml" @()
 Start-Stack "Backend + Frontend (app)"            "infra\dev\docker-compose.yml" @("--build")
 
-# --- Agent Gateway (optional) ------------------------------------------------------------------
 if ($WithAgent -or ([Environment]::GetEnvironmentVariable("AGENT_GATEWAY_ENABLED", "Process") -eq "true")) {
   Start-Stack "Agent Gateway              :8082" "POC.Agent\docker-compose.yml" @("--build")
 }
@@ -116,11 +86,9 @@ if ($WithDab) {
       [Environment]::SetEnvironmentVariable($k, $v, 'Process')
     }
   }
-  # Bind to 0.0.0.0 so Docker containers can reach DAB via host.docker.internal:8000.
-  # DAB's own default (:5000) would collide with the backend's host :5000.
   if (-not [Environment]::GetEnvironmentVariable('ASPNETCORE_URLS', 'Process')) {
     [Environment]::SetEnvironmentVariable('ASPNETCORE_URLS', 'http://0.0.0.0:8000', 'Process')
   }
   Push-Location (Join-Path $root "POC.DAB")
-  try { dab start } finally { Pop-Location }   # blocks; Ctrl+C to stop DAB (docker stays up)
+  try { dab start } finally { Pop-Location }
 }

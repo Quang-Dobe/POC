@@ -1,8 +1,3 @@
-<#
-  dev-down.ps1 — stop the local DEV docker stack (reverse order: app -> Keycloak -> OpenBAO).
-  POC.DAB DEV is a host process (`dab start`) — stop it with Ctrl+C in its own window.
-  Pass -Volumes to also wipe volumes (Keycloak/OpenBAO dev state is ephemeral anyway).
-#>
 param([switch]$Volumes)
 
 $ErrorActionPreference = "Continue"

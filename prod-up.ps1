@@ -1,17 +1,3 @@
-<#
-  prod-up.ps1 — start the local PROD stack from each sub-repo compose:
-      Backend + Frontend (app) -> [Agent Gateway] -> [POC.DAB PROD]
-
-  PROD differs from DEV: identity is Azure AD (login.microsoftonline.com) and secrets come from
-  Azure Key Vault — so there is NO local Keycloak/OpenBAO to start. The app reads .env.prod.
-
-  Usage:
-    .\prod-up.ps1            # docker app stack only (BE/FE from infra\prod)
-    .\prod-up.ps1 -WithDab   # also launch POC.DAB on the host (`dab start`; interactive Fabric auth)
-    .\prod-up.ps1 -WithAgent # also start Agent Gateway container (needs Azure creds in .env.prod)
-
-  Prereqs (one-time): copy .env.example -> .env.prod (root) and fill the Azure AD / Key Vault values.
-#>
 param([switch]$WithDab, [switch]$WithAgent)
 
 $ErrorActionPreference = "Stop"
@@ -25,7 +11,6 @@ function Compose([string]$composeRel, [string[]]$cmdArgs) {
   docker compose -f (Join-Path $root $composeRel) --env-file $envFile @cmdArgs
 }
 
-# No local secret store / identity in PROD (Azure AD + Key Vault), so start the app directly.
 function Start-Stack([string]$label, [string]$composeRel, [string[]]$extra) {
   Write-Host "==> $label" -ForegroundColor Cyan
   Compose $composeRel (@("up", "-d", "--wait") + $extra)
@@ -33,7 +18,6 @@ function Start-Stack([string]$label, [string]$composeRel, [string[]]$extra) {
 }
 Start-Stack "Backend + Frontend (app)" "infra\prod\docker-compose.yml" @("--build")
 
-# --- Agent Gateway (optional) ------------------------------------------------------------------
 if ($WithAgent -or ([Environment]::GetEnvironmentVariable("AGENT_GATEWAY_ENABLED", "Process") -eq "true")) {
   Start-Stack "Agent Gateway              :8082" "POC.Agent\docker-compose.yml" @("--build")
 }
@@ -61,11 +45,9 @@ if ($WithDab) {
       [Environment]::SetEnvironmentVariable($k, $v, 'Process')
     }
   }
-  # Bind to 0.0.0.0 so Docker containers can reach DAB via host.docker.internal:8000.
-  # DAB's own default (:5000) would collide with the backend's host :5000.
   if (-not [Environment]::GetEnvironmentVariable('ASPNETCORE_URLS', 'Process')) {
     [Environment]::SetEnvironmentVariable('ASPNETCORE_URLS', 'http://0.0.0.0:8000', 'Process')
   }
   Push-Location (Join-Path $root "POC.DAB")
-  try { dab start } finally { Pop-Location }   # blocks; Ctrl+C to stop DAB (docker stays up)
+  try { dab start } finally { Pop-Location }
 }

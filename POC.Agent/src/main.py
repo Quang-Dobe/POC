@@ -40,12 +40,6 @@ def health():
 
 
 def _authenticate(request: Request, route: str) -> tuple[str, str]:
-    """Validate the inbound Bearer (the single internal token the BFF minted and forwarded):
-    401 on miss/external/malformed. Returns (api_role, token) where token IS the validated raw
-    bearer — the Agent forwards that same token verbatim to DAB (no exchange, no second header).
-    Raises HTTPException(401) on any failure — for the streaming path this runs in the handler
-    BEFORE the EventSourceResponse is constructed, so a pre-commit failure is a real HTTP 401,
-    never an SSE error event (§10.1: no token logged)."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         _log.warning("401 %s: missing or non-Bearer Authorization header", route)

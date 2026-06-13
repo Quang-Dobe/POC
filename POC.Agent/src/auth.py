@@ -10,10 +10,6 @@ _jwks_clients: dict[str, PyJWKClient] = {}
 
 
 class TokenValidationError(ValueError):
-    """Base for all token validation failures. Carries the best-effort claims/header
-    introspection (kid/iss/aud/jti) so the caller can emit a loud rejection marker
-    without ever touching the token string itself (§10.1 — never log the token)."""
-
     def __init__(self, message: str, kid: str | None = None,
                  iss: str | None = None, aud=None, jti: str | None = None):
         super().__init__(message)
@@ -24,16 +20,11 @@ class TokenValidationError(ValueError):
 
 
 class ExternalTokenError(TokenValidationError):
-    """The token failed at the trust boundary that an external-IDP (Entra/KeyCloak)
-    token hits first: unknown/absent signing key (unknown kid), bad signature, wrong
-    issuer, or wrong audience. This is the E2E-6 class — a token that is NOT BE-minted.
-    The caller emits the grep-able 'no-fallback' rejection marker for this class only."""
+    pass
 
 
 class MalformedTokenError(TokenValidationError):
-    """The token is structurally broken (not a decodable JWT) or carries an expired
-    BE signature. This is a DISTINCT, non-external class: an expired BE token is a
-    real BE token, not the external token E2E-6 asserts rejection of."""
+    pass
 
 
 def _unverified_ssl_ctx() -> ssl.SSLContext:

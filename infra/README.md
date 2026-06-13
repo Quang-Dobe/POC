@@ -1,140 +1,146 @@
 # Infra — `infra/dev/` + `infra/prod/`
 
-Two self-contained compose stacks. The DEV identity/secret stores were extracted on 2026-06-08
-into sibling projects **POC.KeyCloak** and **POC.OpenBao** (supersedes the in-folder
-`compose.stores.yml` split of 2026-06-05, the original single-file Step G layout, and decision D3
-"no separate PROD compose file"):
+Two self-contained compose stacks that run the **app tier only** (frontend + backend, plus a
+DEV-only Redis). The identity store (Keycloak), the secret store (OpenBAO), the Agent Gateway, and
+DAB each live in their own sibling repo with their own compose file — this folder does NOT compose
+them. The root `dev-up.ps1` / `prod-up.ps1` scripts orchestrate the full stack across those repos in
+dependency order.
 
 ```
-POC/                         # the three projects sit as siblings
-  .env.dev                   # DEV env (untracked; from .env.example) — KEYCLOAK_*/OPENBAO_*/BAO_TOKEN + app keys
-  .env.prod                  # PROD env (untracked) — AZURE_*/KEYVAULT_VAULT_URI + app keys + live AZURE_CLIENT_SECRET
-  .env.example               # committed template for both files above
-  POC.KeyCloak/              # DEV identity store (keycloak + realm-export.json) — own compose
-  POC.OpenBao/               # DEV secret store (openbao + openbao-seed + seed.sh) — own compose
-  POC.BFF/                   # .NET BFF + IDP-Simulator (app server) — build context for backend
-  POC.FE/                    # React SPA — build context for frontend
+POC/                         # the projects sit as siblings under the repo root
+  .env.example               # committed template — copied to .env.dev / .env.prod (both untracked)
+  dev-up.ps1 / dev-down.ps1  # DEV orchestration: OpenBAO -> Keycloak -> app (-> Agent)
+  prod-up.ps1 / prod-down.ps1#  PROD orchestration: app (-> Agent); no local identity/secret store
+  POC.BFF/                   # .NET BFF + IDP-Simulator — build context for `backend`
+  POC.FE/                    # React/Vite SPA served by nginx — build context for `frontend`
+  POC.KeyCloak/              # DEV identity store (own compose, :8080)
+  POC.OpenBao/               # DEV secret store (own compose, :8200)
+  POC.Agent/                 # Agent Gateway (own compose, :8082; optional)
+  POC.DAB/                   # Data API Builder (host process via `dab start`; not composed here)
   infra/
-    dev/                     # DEV APP stack ONLY (frontend + backend + redis + tls-terminator) — not the stores
-      docker-compose.yml     #   frontend (DEV VITE_* baked) + backend (ENV=DEV) + redis (session store)
-                             #     + tls-terminator (scoped HTTPS edge); run with
-                             #     --env-file ../../.env.dev (the root dev-up.ps1 passes it)
-      tls/                   #   tls-terminator.conf + certs (DEV self-signed)
-      nginx/
-    prod/                    # PROD-from-local: frontend + backend vs REAL Entra + Key Vault + managed Redis
-      docker-compose.yml     #   no keycloak/openbao/terminator — backend talks to Azure + managed Redis directly
-      nginx/
+    dev/
+      docker-compose.yml     #   backend (HTTPS via Kestrel) + redis + frontend (nginx HTTPS)
+      nginx/default.conf      #   SPA fallback, listens 443 TLS
+      tls/certs/              #   dev-tls.crt + dev-tls.key (self-signed; kept in sync by dev-up.ps1)
+    prod/
+      docker-compose.yml     #   backend (HTTP) + frontend (nginx HTTP) — talks to Azure AD + Key Vault
+      nginx/default.conf      #   SPA fallback, listens 80
 ```
 
-Every host/port and config value lives once in its env file — DEV stores (`KEYCLOAK_*`,
-`OPENBAO_*`, `BAO_TOKEN`) in `.env.dev`, Azure (`AZURE_*`, `KEYVAULT_VAULT_URI`) in `.env.prod`;
-the app keys (`AUTH_*`, `VITE_*`, `*_HOST`/`*_PORT`) are **unprefixed and present in both** — the
-file you load decides the environment. URL values are assembled from the `*_HOST`/`*_PORT`
-primitives by compose's in-file `${...}` interpolation, so a port changes in exactly one line.
+## Services (verified against the compose files)
 
-There is no umbrella: the root `dev-up.ps1` starts OpenBAO, then Keycloak, then this app — each from
-its own sub-repo compose, in three separate compose projects. The backend reaches Keycloak
-(`localhost:8080`) and OpenBAO (`localhost:8200`) over HOST ports (`extra_hosts: localhost:host-gateway`),
-so no shared compose network is needed. `dev-down.ps1` tears them down.
+### `infra/dev/docker-compose.yml`
+
+| Service | Image / build | Host port | Notes |
+|---|---|---|---|
+| `backend` | build `../../POC.BFF` → `poc-backend` | `${BE_PORT}` → `8081` (default 5000) | `ENV=DEV`, `ASPNETCORE_ENVIRONMENT=Development`. Serves **HTTPS** directly via Kestrel (`ASPNETCORE_URLS=https://+:8081`) using the mounted `dev-tls.crt`/`.key`. `extra_hosts: localhost:host-gateway` so it reaches host Keycloak (`:8080`) and OpenBAO (`:8200`). Session store is `redis:6379`. `depends_on: redis`. |
+| `redis` | `redis:7-alpine` | `6379` | Session store. Auth-less, no persistence (`--save "" --appendonly no`). |
+| `frontend` | build `../../POC.FE` → `poc-frontend` | `${FE_PORT}` → container `443` (default 5173) | nginx serving the built SPA over **HTTPS**. `VITE_API_BASE_URL` baked at build time. Mounts `nginx/default.conf` and `tls/certs`. `depends_on: backend`. |
+
+### `infra/prod/docker-compose.yml`
+
+| Service | Image / build | Host port | Notes |
+|---|---|---|---|
+| `backend` | build `../../POC.BFF` → `poc-backend` | `${BE_PORT}` → `8081` (default 5000) | `ENV=PROD`, `ASPNETCORE_ENVIRONMENT=Production`. Plain **HTTP** (`ASPNETCORE_URLS=http://+:8081`) — TLS terminates at the ingress in real PROD. Reads secrets from Azure **Key Vault** (`KeyVault__VaultUri`) and authenticates with `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`. Session store is managed Redis (`${REDIS_ADDRESS}`). `extra_hosts: localhost:host-gateway`. |
+| `frontend` | build `../../POC.FE` → `poc-frontend-prod` | `${FE_PORT}` → container `80` (default 5173) | nginx serving the SPA over **HTTP**. `VITE_API_BASE_URL` baked at build time. Mounts `nginx/default.conf`. `depends_on: backend`. |
+
+There is **no** `keycloak`, `openbao`, `agent`, `dab`, or `tls-terminator` service inside either
+compose file. Those are separate stacks (see the sibling repos and the root scripts).
+
+## DEV vs PROD differences
+
+| | DEV | PROD |
+|---|---|---|
+| Identity | Keycloak (`POC.KeyCloak`, `https://localhost:8080`, realm `poc`) | Azure AD (`login.microsoftonline.com`) |
+| Secrets | OpenBAO (`POC.OpenBao`, `http://localhost:8200`) | Azure Key Vault (`KeyVault__VaultUri`) |
+| Backend scheme | HTTPS in-container (Kestrel + self-signed cert) | HTTP in-container (TLS at ingress) |
+| Frontend nginx | listens `443` (TLS) | listens `80` |
+| Redis | composed sibling `redis:7-alpine` (`redis:6379`) | managed Redis via `${REDIS_ADDRESS}` |
+| Backend image | `poc-backend` | `poc-backend` |
+| Frontend image | `poc-frontend` | `poc-frontend-prod` |
+| Azure creds | none | `AZURE_TENANT_ID`/`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET` |
+
+## nginx (the `frontend` container)
+
+Both nginx configs do the same one job: serve the built SPA and fall back to `index.html` so
+client-side routes (e.g. the OIDC redirect landing) return the app instead of a 404
+(`try_files $uri $uri/ /index.html`). nginx here is **not** a reverse proxy to the backend — the
+browser calls the backend directly at `VITE_API_BASE_URL`. The only difference between the two:
+
+- `dev/nginx/default.conf` — `listen 443 ssl;` with `ssl_certificate /etc/nginx/certs/dev-tls.crt`
+  and `..._key /etc/nginx/certs/dev-tls.key` (the mounted `tls/certs`). Serves the SPA over HTTPS.
+- `prod/nginx/default.conf` — `listen 80;`, no TLS. The ingress terminates TLS in real PROD.
+
+Both are mounted into `/etc/nginx/conf.d/default.conf` at runtime (the FE Dockerfile does not bake
+them).
+
+## DEV TLS certs
+
+`dev/tls/certs/dev-tls.crt` + `dev-tls.key` are the **self-signed dev cert**, used by BOTH the dev
+`backend` (Kestrel) and the dev `frontend` (nginx) so the whole DEV surface is HTTPS. `dev-up.ps1`
+keeps them in lockstep with the **trusted** ASP.NET dev cert: each run it compares thumbprints and
+re-exports via `dotnet dev-certs https` if the mounted PEM is missing or stale. This matters because
+DAB (a host process) fetches the BFF's OIDC metadata over HTTPS and validates the served cert against
+the host trust store — a drifted cert means no JWKS and 401 on every token.
+
+## Networks
+
+Neither compose file declares an explicit network, so each stack uses its own Compose default bridge.
+The dev `backend` and `frontend` share that bridge (the backend reaches `redis` by service name).
+Cross-stack reachability (backend → host Keycloak/OpenBAO, DAB/Agent → backend) is over **host
+ports**, enabled by `extra_hosts: ["localhost:host-gateway"]` — so no shared Compose network is
+needed between repos.
+
+## Configuration
+
+Every host/port/URL lives once in the root env file (`.env.dev` or `.env.prod`, both copied from
+`.env.example`). URLs are assembled from `*_HOST`/`*_PORT` primitives via Compose `${...}`
+interpolation, so a port changes in one line. Key values from `.env.example`:
+
+- `BE_PORT=5000`, `FE_PORT=5173`, `KEYCLOAK_PORT=8080`, `OPENBAO_PORT=8200`, `AGENT_PORT=8082`
+- `AUTH_AUTHORITY=https://localhost:8080/realms/poc`, `VAULT_ADDRESS=http://localhost:8200`
+- `VITE_API_BASE_URL=https://localhost:5000`, `CORS_SPA_ORIGIN=https://localhost:5173`
+- PROD adds `KEYVAULT_VAULT_URI`, `TENANT_ID`, `AUTH_API_CLIENT_ID`, `AUTH_API_CLIENT_SECRET`,
+  `REDIS_ADDRESS`
 
 ## Run
 
+Use the root scripts — they pass `--env-file` and start everything in dependency order. Both stacks
+publish the same host ports, so run **one environment at a time**.
+
 ```powershell
-# Per-environment env files (copy once, from the POC root):
-Copy-Item .env.example .env.dev    # DEV section — defaults work as-is
-# copy the PROD section of .env.example into .env.prod and fill ids + secret (prod only)
+# One-time setup (from the POC root):
+Copy-Item .env.example .env.dev    # DEV defaults work as-is
+Copy-Item .env.example .env.prod   # then fill the Azure AD / Key Vault values
 
-# DEV — start the whole stack in order (OpenBAO -> Keycloak -> backend/frontend):
-.\dev-up.ps1                       # from the POC root; -WithDab also launches POC.DAB
-# (app compose alone: docker compose -f infra/dev/docker-compose.yml --env-file .env.dev up --build)
+# DEV — OpenBAO -> Keycloak -> backend/frontend (syncs the dev TLS cert first):
+.\dev-up.ps1                # add -WithAgent for the Agent Gateway, -WithDab to also run POC.DAB
+.\dev-down.ps1              # tear down (reverse order); -Volumes also wipes volumes
 
-# PROD-from-local (self-contained in .env.prod)
+# PROD-from-local — app only (Azure AD + Key Vault; no local identity/secret store):
+.\prod-up.ps1              # add -WithAgent / -WithDab as above
+.\prod-down.ps1            # tear down; -Volumes also wipes volumes
+```
+
+Run just this app stack (without the orchestration / store dependencies):
+
+```powershell
+docker compose -f infra/dev/docker-compose.yml  --env-file .env.dev  up --build
 docker compose -f infra/prod/docker-compose.yml --env-file .env.prod up --build
 ```
 
-Both stacks publish the same host ports — run **one at a time**:
+### Endpoints
 
-| Service | URL (host) | DEV | PROD |
-|---|---|---|---|
-| Frontend (nginx) | http://localhost:5173 | ✓ | ✓ |
-| Backend (HTTP edge) | http://localhost:5000 (`BE_PORT`) — `/` liveness, browser `/auth`+`/api` (same scheme as FE so the SameSite=Lax session cookie attaches) | ✓ | ✓ |
-| TLS terminator (nginx) | https://localhost:5001 (`BE_TLS_PORT`) — scoped HTTPS edge fronting the BFF: DAB OIDC discovery/JWKS + the top-level `/auth/callback`. DEV-only; PROD terminates TLS at the ingress | ✓ | — |
-| Redis (session store) | localhost:6379 (`redis:6379` on the compose net) — DEV is auth-less, no persistence; PROD uses managed Redis (`REDIS_ADDRESS`, password via Key Vault) | ✓ | — |
-| Keycloak | https://localhost:8080 — admin `admin`/`admin`, realm `poc` (shared w/ POC.DAB) | ✓ | — |
-| OpenBAO | http://localhost:8200 — dev mode, KV v2 at `secret/` | ✓ | — |
-
-## DEV boot order (enforced by `dev-up.ps1` — it waits for each stage before starting the next)
-
-```
-openbao (healthy) ─► openbao-seed (writes secrets, exits 0) ─┐
-                                                             │   ┌─► frontend
-                                       redis ────────────────┼─► backend ─┤
-keycloak (healthy, realm imported) ──────────────────────────┘            └─► tls-terminator
-```
+| Service | DEV | PROD |
+|---|---|---|
+| Frontend (nginx) | `https://localhost:5173` | `http://localhost:5173` |
+| Backend (BFF) | `https://localhost:5000` (`/` liveness, `/api/message` gated) | `http://localhost:5000` |
+| Redis | `localhost:6379` (composed) | managed (`REDIS_ADDRESS`) |
+| Keycloak | `https://localhost:8080` (realm `poc`, `admin`/`admin`) | — (Azure AD) |
+| OpenBAO | `http://localhost:8200` | — (Key Vault) |
+| Agent Gateway | `http://localhost:8082` (optional) | `http://localhost:8082` (optional) |
 
 ## DEV test user (e2e login)
 
-`testuser` / `Test1234!` — **DEV-ONLY**, shipped in `../POC.KeyCloak/realm-export.json`. Only logs
-into the throwaway local realm; never reuse anywhere real.
-
-## Sanctioned DEV-only committed exceptions (everything else: no secret values committed)
-
-1. Root `.env.example` → `BAO_TOKEN=dev-only-token` — OpenBAO dev-mode root token placeholder
-   (single secret-via-env exception, `secrets-dual-provider` §"Hard rules"). One value, read by
-   both the store and the backend from the same `.env.dev` — they cannot drift.
-2. `../POC.KeyCloak/realm-export.json` → `testuser` / `Test1234!` — DEV-only e2e login.
-
-OpenBAO seed value (`Message--DisplayString`) is a non-secret DEV
-placeholder written at seed time by `../POC.OpenBao/seed.sh` — non-empty on purpose (backend
-fail-fasts on empty secrets).
-
-## Trap mitigations (analyzed.md R2/R4 — why these exact settings)
-
-- **Keycloak issuer host == browser host.** `KC_HOSTNAME=localhost` makes the issuer
-  `https://localhost:8080/realms/poc` for the browser. The backend uses
-  `extra_hosts: ["localhost:host-gateway"]` AND listens on container port **8081** (not 8080) so
-  its discovery call to `localhost:8080` falls through to host Keycloak instead of connecting to
-  itself — issuer matches `appsettings.DEV.json` byte-for-byte. The self-signed dev cert is trusted
-  by a DEV-only backchannel handler in `Program.cs`. Mismatch = the classic "401 with a valid login"
-  (`oidc-dual-idp`).
-- **Audience mapper.** Realm export ships client scope `poc-api` (default on `poc-spa`) carrying
-  `oidc-audience-mapper` with `included.custom.audience=poc-api` → token `aud` contains what the
-  backend validates.
-- **Keycloak healthcheck on internal http 8080** (KC 24.0; management port 9000 is KC 25+); **OpenBAO healthcheck
-  via 127.0.0.1** (image resolves `localhost` → `::1` first, dev listener is IPv4-any).
-- **Per-environment root env file.** `.env.dev` (DEV) / `.env.prod` (PROD) drive everything: FE
-  values are baked as build args; BE values arrive as `Auth__*`/`KeyVault__*`/`Vault__*` env vars,
-  which override the committed `appsettings.{ENV}.json` defaults (`Program.cs` re-adds
-  `AddEnvironmentVariables()` above the ENV-keyed json — the documented layering json → env vars →
-  secret store). `dev-up.ps1` passes `--env-file .env.dev` to every DEV stack, so the OpenBAO
-  store's root token and the backend's `BAO_TOKEN` are literally the same line — no drift.
-- **Scoped HTTPS edge, same-scheme browser edge.** Post-refactor the BE is a BFF + IDP-Simulator;
-  the browser holds only an opaque httpOnly session cookie. DAB 2.0.8 reads `jwt.issuer`
-  (`AUTH_DAB_ISSUER=https://localhost:5001`) as an OIDC Authority under `RequireHttpsMetadata`, so it
-  fetches discovery/JWKS over HTTPS via the `tls-terminator` (`nginx:1.27-alpine`), which also fronts
-  the top-level `/auth/callback`. The BE container stays HTTP on `:8081`; only this edge is TLS. The
-  browser `/auth`+`/api` fetches hit the `http://localhost:5000` BE edge — **same scheme as the FE
-  origin**, so Chromium attaches the `SameSite=Lax` session cookie to `credentials:'include'` (the
-  https edge would be cross-scheme = cross-site and drop it). In PROD there is no terminator service —
-  **TLS terminates at the ingress** and `AUTH_DAB_ISSUER` is the deployed BFF origin.
-- **Redis is the session-store backing (Step D).** DEV runs `redis:7-alpine` as a compose sibling,
-  reached by service name (`Session__RedisAddress: redis:6379`) overriding `appsettings.DEV.json`'s
-  `localhost:6379` (unreachable from inside a container); it is auth-less with no persistence. PROD
-  points `Session__RedisAddress` at a managed Redis (`${REDIS_ADDRESS}`, e.g. Azure Cache for Redis),
-  password supplied via Key Vault (`Session:RedisPassword`), never inline.
-- **No inbound JwtBearer audience.** The former `Auth__Audience` (and the retired
-  `Agent__ClientId/Secret/TokenEndpoint/AgentScope` OBO keys) were removed from both compose files
-  with `AddJwtBearer` + the Agent token providers (Steps F/G) — there is no inbound validator left to
-  bind them. The Agent + DAB are trusted via the BE-minted RS256 token only.
-
-## PROD Azure prerequisites (once per tenant)
-
-- BFF app registration (the only OIDC client): **Web** platform, redirect URI
-  `https://<bff-origin>/auth/callback` (the ingress TLS edge). The browser holds no token — the BFF
-  runs the server-side authorization-code + PKCE flow. The backend authenticates to Key Vault with
-  this app's credentials (`AZURE_CLIENT_ID`/`AZURE_CLIENT_SECRET`), so the app needs the **Key Vault
-  Secrets User** role on the vault.
-- No separate API / OBO app registration: the downstreams (Agent, DAB) trust the BFF's own
-  issuer + JWKS, not an Entra `api://` scope.
-- Key Vault secrets: `Message--DisplayString`, `IdpSimulator--SigningKeyPem` (the RS256 downstream
-  signing key), and `Session--RedisPassword` (managed Redis).
+`testuser` / `Test1234!` — **DEV-ONLY**, shipped in `../POC.KeyCloak/realm-export.json`. Logs into
+the throwaway local realm only; never reuse anywhere real.
