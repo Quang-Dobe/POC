@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StreamHandlers } from '@/api/stream';
 
@@ -9,17 +10,26 @@ vi.mock('@/api/stream', () => ({
   openAskStream: vi.fn(),
   postExtendSession: vi.fn(),
 }));
-const { mockLogout, mockRecheck } = vi.hoisted(() => ({
+const { mockLogout, mockRecheck, mockMe } = vi.hoisted(() => ({
   mockLogout: vi.fn(),
   mockRecheck: vi.fn(),
+  mockMe: { value: null as { displayName: string; roles: string[] } | null },
 }));
 vi.mock('@/auth/AuthContext', () => ({
-  useAuth: () => ({ logout: mockLogout, recheck: mockRecheck }),
+  useAuth: () => ({ logout: mockLogout, recheck: mockRecheck, me: mockMe.value }),
 }));
 
 import { fetchMessage } from '@/api/client';
 import { openAskStream, postExtendSession } from '@/api/stream';
 import MessagePage from '@/pages/MessagePage';
+
+function renderPage(): void {
+  render(
+    <MemoryRouter>
+      <MessagePage />
+    </MemoryRouter>,
+  );
+}
 
 const mockFetchMessage = vi.mocked(fetchMessage);
 const mockOpenAskStream = vi.mocked(openAskStream);
@@ -28,6 +38,7 @@ const mockPostExtendSession = vi.mocked(postExtendSession);
 beforeEach(() => {
   mockFetchMessage.mockResolvedValue('seeded');
   mockPostExtendSession.mockResolvedValue(true);
+  mockMe.value = null;
 });
 
 afterEach(() => {
@@ -42,17 +53,33 @@ function typeAndAsk(value: string): void {
 describe('MessagePage', () => {
   it('renders the string returned by fetchMessage', async () => {
     mockFetchMessage.mockResolvedValue('the seeded secret string');
-    render(<MessagePage />);
+    renderPage();
 
     expect(await screen.findByTestId('message')).toHaveTextContent('the seeded secret string');
   });
 
   it('renders an error state when fetchMessage rejects', async () => {
     mockFetchMessage.mockRejectedValue(new Error('boom'));
-    render(<MessagePage />);
+    renderPage();
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByTestId('message')).not.toBeInTheDocument();
+  });
+
+  it('shows the invite link for a manager', async () => {
+    mockMe.value = { displayName: 'Mona Manager', roles: ['manager'] };
+    renderPage();
+
+    const link = await screen.findByRole('link', { name: 'Invite a new user' });
+    expect(link).toHaveAttribute('href', '/invite');
+  });
+
+  it('hides the invite link for a non-manager', async () => {
+    mockMe.value = { displayName: 'Rita Reader', roles: ['reader'] };
+    renderPage();
+
+    await screen.findByTestId('message');
+    expect(screen.queryByRole('link', { name: 'Invite a new user' })).not.toBeInTheDocument();
   });
 
   describe('streamed ask flow', () => {
@@ -61,7 +88,7 @@ describe('MessagePage', () => {
         handlers.onMessage('Hello ');
         handlers.onMessage('world');
       });
-      render(<MessagePage />);
+      renderPage();
 
       typeAndAsk('hi?');
 
@@ -74,7 +101,7 @@ describe('MessagePage', () => {
       mockOpenAskStream.mockImplementation(async (_question, handlers: StreamHandlers) => {
         handlers.onMessage('done');
       });
-      render(<MessagePage />);
+      renderPage();
 
       typeAndAsk('q');
 
@@ -89,7 +116,7 @@ describe('MessagePage', () => {
         handlers.onMessage('chunk');
         handlers.onControl('extend-session');
       });
-      render(<MessagePage />);
+      renderPage();
 
       typeAndAsk('long question');
 
@@ -101,7 +128,7 @@ describe('MessagePage', () => {
       mockOpenAskStream.mockImplementation(async (_question, handlers: StreamHandlers) => {
         handlers.onControl('something-else');
       });
-      render(<MessagePage />);
+      renderPage();
 
       typeAndAsk('q');
 
@@ -113,7 +140,7 @@ describe('MessagePage', () => {
 
     it('shows an error when the pre-commit open rejects', async () => {
       mockOpenAskStream.mockRejectedValue(new Error('boom'));
-      render(<MessagePage />);
+      renderPage();
 
       typeAndAsk('q');
 
@@ -124,7 +151,7 @@ describe('MessagePage', () => {
     });
 
     it('disables the Ask button when the input is empty', () => {
-      render(<MessagePage />);
+      renderPage();
 
       expect(screen.getByRole('button', { name: 'Ask' })).toBeDisabled();
       expect(mockOpenAskStream).not.toHaveBeenCalled();

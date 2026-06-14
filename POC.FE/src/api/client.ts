@@ -74,6 +74,58 @@ export async function fetchMessage(): Promise<string> {
   return parsed.message;
 }
 
+export interface InviteResult {
+  readonly subject: string;
+  readonly alreadyExisted: boolean;
+  readonly passwordSet: boolean;
+}
+
+function asInviteResult(body: unknown): InviteResult | null {
+  if (
+    typeof body === 'object' &&
+    body !== null &&
+    'subject' in body &&
+    'alreadyExisted' in body &&
+    'passwordSet' in body &&
+    typeof (body as { subject: unknown }).subject === 'string' &&
+    typeof (body as { alreadyExisted: unknown }).alreadyExisted === 'boolean' &&
+    typeof (body as { passwordSet: unknown }).passwordSet === 'boolean'
+  ) {
+    return {
+      subject: (body as { subject: string }).subject,
+      alreadyExisted: (body as { alreadyExisted: boolean }).alreadyExisted,
+      passwordSet: (body as { passwordSet: boolean }).passwordSet,
+    };
+  }
+  return null;
+}
+
+export async function createInvite(email: string): Promise<InviteResult> {
+  const response = await fetch(`${config.apiBaseUrl}/auth/invite`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ username: email }),
+  });
+
+  if (response.status === 401) {
+    throw new UnauthorizedError();
+  }
+  if (!response.ok) {
+    throw new ApiError(`POST /auth/invite failed with status ${response.status}`);
+  }
+
+  const body: unknown = await response.json();
+  const parsed = asInviteResult(body);
+  if (parsed === null) {
+    throw new ApiError('POST /auth/invite returned an unexpected response shape');
+  }
+
+  return parsed;
+}
+
 export async function askAgent(
   question: string,
   sessionId: string | null,

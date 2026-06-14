@@ -10,12 +10,13 @@ using Poc.Bff.Domain.Invites;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+/// <summary>
+/// DEV invite path: provisions a Keycloak user with the fixed default password sourced from the
+/// secret store (<c>Invite:DefaultPassword</c>). The invited user signs in with that password.
+/// </summary>
 public sealed class KeycloakInviteProvisioner : IInviteProvisioner
 {
     public const string HttpClientName = "KeycloakAdmin";
-
-    private const string TempPassword = "ChangeMe-1!";
-    private const string UpdatePasswordAction = "UPDATE_PASSWORD";
 
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<KeycloakInviteProvisioner> _logger;
@@ -49,6 +50,13 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
             throw new InviteException(
                 "The Keycloak admin credential is unconfigured (Keycloak:AdminClientSecret); " +
                 "cannot provision an invited user.");
+        }
+
+        if (string.IsNullOrWhiteSpace(_invite.DefaultPassword))
+        {
+            throw new InviteException(
+                "The invite default password is unconfigured (Invite:DefaultPassword in the secret " +
+                "store); cannot provision an invited user.");
         }
 
         var baseUrl = _admin.AdminBaseUrl.TrimEnd('/');
@@ -108,16 +116,16 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
         var body = new CreateUserRequest(
             Username: request.Username,
             Enabled: true,
-            Email: request.DisplayName,
+            EmailVerified: true,
+            Email: request.DisplayName ?? request.Username,
             Attributes: new Dictionary<string, string[]>
             {
                 ["tenantId"] = new[] { _invite.TenantId },
                 ["region"] = new[] { _invite.DefaultRegion ?? string.Empty },
             },
-            RequiredActions: new[] { UpdatePasswordAction },
             Credentials: new[]
             {
-                new CredentialRequest(Type: "password", Value: TempPassword, Temporary: true),
+                new CredentialRequest(Type: "password", Value: _invite.DefaultPassword!, Temporary: false),
             });
 
         var client = _httpClientFactory.CreateClient(HttpClientName);
@@ -142,7 +150,7 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
             if (response.StatusCode == HttpStatusCode.Conflict)
             {
                 _logger.LogInformation("Keycloak invite: the user already existed (idempotent re-invite).");
-                return new InviteOutcome(request.Username, RedeemUrl(baseUrl), AlreadyExisted: true);
+                return new InviteOutcome(request.Username, AlreadyExisted: true, PasswordSet: false);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -151,13 +159,10 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
                     $"The Keycloak create-user request failed with status {(int)response.StatusCode}.");
             }
 
-            _logger.LogInformation("Keycloak invite: provisioned a new external user (UPDATE_PASSWORD required).");
-            return new InviteOutcome(request.Username, RedeemUrl(baseUrl), AlreadyExisted: false);
+            _logger.LogInformation("Keycloak invite: provisioned a new user with the default password.");
+            return new InviteOutcome(request.Username, AlreadyExisted: false, PasswordSet: true);
         }
     }
-
-    private string RedeemUrl(string baseUrl) =>
-        $"{baseUrl}/realms/{_admin.Realm}/account";
 
     private sealed record TokenResponse(
         [property: JsonPropertyName("access_token")] string? AccessToken);
@@ -165,9 +170,9 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
     private sealed record CreateUserRequest(
         [property: JsonPropertyName("username")] string Username,
         [property: JsonPropertyName("enabled")] bool Enabled,
+        [property: JsonPropertyName("emailVerified")] bool EmailVerified,
         [property: JsonPropertyName("email")] string? Email,
         [property: JsonPropertyName("attributes")] IReadOnlyDictionary<string, string[]> Attributes,
-        [property: JsonPropertyName("requiredActions")] IReadOnlyList<string> RequiredActions,
         [property: JsonPropertyName("credentials")] IReadOnlyList<CredentialRequest> Credentials);
 
     private sealed record CredentialRequest(

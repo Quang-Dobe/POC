@@ -128,13 +128,16 @@ through `IOptions<T>`; sections are validated on start.
 | `IdpSimulatorOptions` | `IdpSimulator` | `Issuer`, `Audience`, `DownstreamTokenTtlSeconds`, `SigningKeyId`, signing-key PEMs (current + next, secret-store backed) |
 | `AgentOptions` | `Agent` | `Host`, `Port`, `AskTimeoutSeconds` |
 | `MessageOptions` | `Message` | `DisplayString` (secret-store backed in PROD) |
-| `InviteOptions` | `Invite` | `TenantId`, `DefaultRoles`, `DefaultRegion` |
+| `InviteOptions` | `Invite` | `TenantId`, `DefaultRoles`, `DefaultRegion`, `DefaultPassword?` (secret-store backed) |
 | `KeycloakAdminOptions` | `Keycloak` | `AdminBaseUrl`, `Realm`, `AdminClientId`, `AdminClientSecret?` |
 | `RoleMap` | `RoleMap` | `Entries` (username -> roles + region) |
 
 `Infrastructure/DependencyInjection.cs` selects providers by `ENV`: PROD uses `EntraInviteProvisioner`
 and Key Vault; DEV uses `KeycloakInviteProvisioner` and OpenBao (and accepts the local self-signed
-cert for the DEV IdP/Keycloak HTTP clients). Sessions, data-protection keys, and signing keys are
+cert for the DEV IdP/Keycloak HTTP clients). Invited users are provisioned with the fixed default
+password read from the secret store under `Invite:DefaultPassword` (DEV: seeded as
+`Invite--DefaultPassword` in `POC.OpenBao/seed.sh`; PROD: a Key Vault secret named
+`Invite--DefaultPassword`). The value is never placed in `appsettings`. Sessions, data-protection keys, and signing keys are
 backed by Redis / the secret store. Set `DisableSecretStore=true` to skip the secret store (used by tests).
 
 ## Build and run

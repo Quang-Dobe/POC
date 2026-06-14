@@ -17,6 +17,10 @@ public static class SecretStoreConfiguration
 
     internal const string KeycloakAdminClientSecretKey = "Keycloak:AdminClientSecret";
 
+    internal const string EntraGraphClientSecretKey = "EntraGraph:ClientSecret";
+
+    internal const string InviteDefaultPasswordKey = "Invite:DefaultPassword";
+
     private static readonly string[] RequiredKeys =
         { DisplayStringKey, SigningKeyPemKey, DataProtectionMasterKeyKey };
 
