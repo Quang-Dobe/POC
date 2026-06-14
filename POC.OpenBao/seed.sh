@@ -33,7 +33,8 @@ bao kv put secret/poc \
   "Message--DisplayString=Hello from OpenBAO (DEV)" \
   "IdpSimulator--SigningKeyPem=@/tmp/idp-signing.key" \
   "DataProtection--MasterKey=${DP_MASTER_KEY}" \
-  "Keycloak--AdminClientSecret=poc-admin-cli-dev-secret"
+  "Keycloak--AdminClientSecret=poc-admin-cli-dev-secret" \
+  "Invite--DefaultPassword=Test1234!"
 
 rm -f /tmp/idp-signing.key
-echo "seed: wrote Message--DisplayString + IdpSimulator--SigningKeyPem + DataProtection--MasterKey + Keycloak--AdminClientSecret to secret/poc."
+echo "seed: wrote Message--DisplayString + IdpSimulator--SigningKeyPem + DataProtection--MasterKey + Keycloak--AdminClientSecret + Invite--DefaultPassword to secret/poc."

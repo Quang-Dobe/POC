@@ -83,6 +83,7 @@ public class InviteEndpointTests : IClassFixture<InviteEndpointTests.InviteFacto
         Assert.NotNull(body);
         Assert.Equal("erin@example.com", body!.Subject);
         Assert.False(body.AlreadyExisted);
+        Assert.True(body.PasswordSet);
     }
 
     [Fact]
@@ -104,7 +105,7 @@ public class InviteEndpointTests : IClassFixture<InviteEndpointTests.InviteFacto
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
     }
 
-    private sealed record InviteBody(string Subject, string RedeemUrl, bool AlreadyExisted);
+    private sealed record InviteBody(string Subject, bool AlreadyExisted, bool PasswordSet);
 
     public sealed class InviteFactory : BffWebApplicationFactory
     {
@@ -157,7 +158,7 @@ public class InviteEndpointTests : IClassFixture<InviteEndpointTests.InviteFacto
         public Task<InviteOutcome> ProvisionAsync(InviteRequest request, CancellationToken ct = default) =>
             Task.FromResult(new InviteOutcome(
                 Subject: request.Username,
-                RedeemUrl: "https://invite.stub/redeem/x",
-                AlreadyExisted: false));
+                AlreadyExisted: false,
+                PasswordSet: true));
     }
 }

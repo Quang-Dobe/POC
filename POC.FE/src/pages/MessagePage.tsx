@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { fetchMessage } from '@/api/client';
 import { openAskStream, postExtendSession } from '@/api/stream';
 import { useAuth } from '@/auth/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
+const ManagerRole = 'manager';
 
 type MessageState =
   | { readonly status: 'loading' }
@@ -17,7 +20,8 @@ type AskState =
   | { readonly status: 'error' };
 
 function MessagePage(): JSX.Element {
-  const { logout, recheck } = useAuth();
+  const { logout, recheck, me } = useAuth();
+  const isManager = me?.roles.includes(ManagerRole) ?? false;
   const [state, setState] = useState<MessageState>({ status: 'loading' });
   const [question, setQuestion] = useState('');
   const [ask, setAsk] = useState<AskState>({ status: 'idle' });
@@ -120,6 +124,12 @@ function MessagePage(): JSX.Element {
           )}
           {ask.status === 'error' && (
             <p role="alert">Could not get an answer. Please try again.</p>
+          )}
+
+          {isManager && (
+            <Button asChild variant="outline" className="w-full">
+              <Link to="/invite">Invite a new user</Link>
+            </Button>
           )}
 
           <Button variant="outline" className="w-full" onClick={() => void logout()}>

@@ -74,6 +74,8 @@ public static class DependencyInjection
         if (string.Equals(env, "PROD", StringComparison.OrdinalIgnoreCase))
         {
             services.AddSingleton<IInviteProvisioner, EntraInviteProvisioner>();
+
+            services.AddHttpClient(EntraInviteProvisioner.HttpClientName);
         }
         else
         {

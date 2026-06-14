@@ -57,6 +57,7 @@ public class BffWebApplicationFactory : WebApplicationFactory<Program>
         ["DataProtection:MasterKey"] = "test-master-key-32-bytes-padding!",
 
         ["Invite:TenantId"] = "test-tenant-id",
+        ["Invite:DefaultPassword"] = "Test1234!",
 
         ["Keycloak:AdminBaseUrl"] = "https://keycloak.test.local",
         ["Keycloak:Realm"] = "test-realm",
