@@ -4,8 +4,9 @@ using System.ComponentModel.DataAnnotations;
 
 /// <summary>
 /// Microsoft Graph client-credentials settings the Entra invite provisioner (PROD) uses to
-/// create a member user with an auto-generated default password. The client secret is read
-/// from the secret-store seam (Key Vault), never from this file.
+/// send a B2B guest invitation (<c>POST /invitations</c>) so the invited user receives an
+/// email with a single-use redeem URL. The client secret is read from the secret-store seam
+/// (Key Vault), never from this file.
 /// </summary>
 public sealed class EntraGraphOptions
 {
@@ -24,11 +25,4 @@ public sealed class EntraGraphOptions
     public string ClientId { get; init; } = default!;
 
     public string? ClientSecret { get; init; }
-
-    /// <summary>
-    /// The verified domain new member users are created under (e.g. "contoso.onmicrosoft.com").
-    /// The userPrincipalName becomes "{mailNickname}@{UserDomain}".
-    /// </summary>
-    [Required]
-    public string UserDomain { get; init; } = default!;
 }

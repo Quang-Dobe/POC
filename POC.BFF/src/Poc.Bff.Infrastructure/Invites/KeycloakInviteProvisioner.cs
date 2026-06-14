@@ -7,36 +7,38 @@ using System.Text.Json.Serialization;
 using Poc.Bff.Application.Configuration;
 using Poc.Bff.Application.Abstractions;
 using Poc.Bff.Domain.Invites;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
+/// <summary>
+/// DEV invite path: provisions a Keycloak user with no credential, then triggers the realm's
+/// native <c>execute-actions-email</c> so Keycloak emails the invited user a single-use action
+/// link to set their own password (and verify email). No password is ever generated or returned.
+/// </summary>
 public sealed class KeycloakInviteProvisioner : IInviteProvisioner
 {
     public const string HttpClientName = "KeycloakAdmin";
 
-    private const string UpdatePasswordAction = "UPDATE_PASSWORD";
+    private static readonly string[] EmailActions = { "UPDATE_PASSWORD", "VERIFY_EMAIL" };
 
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IPasswordGenerator _passwordGenerator;
     private readonly ILogger<KeycloakInviteProvisioner> _logger;
     private readonly KeycloakAdminOptions _admin;
     private readonly InviteOptions _invite;
 
     public KeycloakInviteProvisioner(
         IHttpClientFactory httpClientFactory,
-        IPasswordGenerator passwordGenerator,
         IOptions<KeycloakAdminOptions> adminOptions,
         IOptions<InviteOptions> inviteOptions,
         ILogger<KeycloakInviteProvisioner> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
-        ArgumentNullException.ThrowIfNull(passwordGenerator);
         ArgumentNullException.ThrowIfNull(adminOptions);
         ArgumentNullException.ThrowIfNull(inviteOptions);
         ArgumentNullException.ThrowIfNull(logger);
 
         _httpClientFactory = httpClientFactory;
-        _passwordGenerator = passwordGenerator;
         _logger = logger;
         _admin = adminOptions.Value;
         _invite = inviteOptions.Value;
@@ -56,7 +58,18 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
 
         var baseUrl = _admin.AdminBaseUrl.TrimEnd('/');
         var adminToken = await GetAdminTokenAsync(baseUrl, ct).ConfigureAwait(false);
-        return await CreateUserAsync(baseUrl, adminToken, request, ct).ConfigureAwait(false);
+
+        var userId = await CreateUserAsync(baseUrl, adminToken, request, ct).ConfigureAwait(false);
+        if (userId is null)
+        {
+            _logger.LogInformation("Keycloak invite: the user already existed (idempotent re-invite).");
+            return new InviteOutcome(request.Username, AlreadyExisted: true, InvitationSent: false);
+        }
+
+        await SendActionsEmailAsync(baseUrl, adminToken, userId, ct).ConfigureAwait(false);
+
+        _logger.LogInformation("Keycloak invite: provisioned a new user and sent the action-email link.");
+        return new InviteOutcome(request.Username, AlreadyExisted: false, InvitationSent: true);
     }
 
     private async Task<string> GetAdminTokenAsync(string baseUrl, CancellationToken ct)
@@ -100,7 +113,11 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
         }
     }
 
-    private async Task<InviteOutcome> CreateUserAsync(
+    /// <summary>
+    /// Creates the user with no credential. Returns the new user's id, or <c>null</c> when the
+    /// user already existed (HTTP 409, idempotent re-invite).
+    /// </summary>
+    private async Task<string?> CreateUserAsync(
         string baseUrl,
         string adminToken,
         InviteRequest request,
@@ -108,22 +125,16 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
     {
         var usersUrl = $"{baseUrl}/admin/realms/{_admin.Realm}/users";
 
-        var generatedPassword = _passwordGenerator.Generate();
-
         var body = new CreateUserRequest(
             Username: request.Username,
             Enabled: true,
-            Email: request.DisplayName,
+            Email: request.DisplayName ?? request.Username,
             Attributes: new Dictionary<string, string[]>
             {
                 ["tenantId"] = new[] { _invite.TenantId },
                 ["region"] = new[] { _invite.DefaultRegion ?? string.Empty },
             },
-            RequiredActions: new[] { UpdatePasswordAction },
-            Credentials: new[]
-            {
-                new CredentialRequest(Type: "password", Value: generatedPassword, Temporary: true),
-            });
+            RequiredActions: EmailActions);
 
         var client = _httpClientFactory.CreateClient(HttpClientName);
         using var message = new HttpRequestMessage(HttpMethod.Post, usersUrl)
@@ -146,12 +157,7 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
         {
             if (response.StatusCode == HttpStatusCode.Conflict)
             {
-                _logger.LogInformation("Keycloak invite: the user already existed (idempotent re-invite).");
-                return new InviteOutcome(
-                    request.Username,
-                    RedeemUrl(baseUrl),
-                    AlreadyExisted: true,
-                    GeneratedPassword: string.Empty);
+                return null;
             }
 
             if (!response.IsSuccessStatusCode)
@@ -160,17 +166,65 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
                     $"The Keycloak create-user request failed with status {(int)response.StatusCode}.");
             }
 
-            _logger.LogInformation("Keycloak invite: provisioned a new external user (UPDATE_PASSWORD required).");
-            return new InviteOutcome(
-                request.Username,
-                RedeemUrl(baseUrl),
-                AlreadyExisted: false,
-                GeneratedPassword: generatedPassword);
+            var location = response.Headers.Location?.ToString();
+            if (string.IsNullOrWhiteSpace(location))
+            {
+                throw new InviteException(
+                    "The Keycloak create-user response carried no Location header; cannot resolve the user id.");
+            }
+
+            return location.TrimEnd('/').Split('/')[^1];
         }
     }
 
-    private string RedeemUrl(string baseUrl) =>
-        $"{baseUrl}/realms/{_admin.Realm}/account";
+    private async Task SendActionsEmailAsync(
+        string baseUrl,
+        string adminToken,
+        string userId,
+        CancellationToken ct)
+    {
+        var emailUrl = $"{baseUrl}/admin/realms/{_admin.Realm}/users/{userId}/execute-actions-email";
+
+        var query = new Dictionary<string, string?>();
+        if (!string.IsNullOrWhiteSpace(_admin.RedeemClientId))
+        {
+            query["client_id"] = _admin.RedeemClientId;
+        }
+        if (!string.IsNullOrWhiteSpace(_admin.RedeemRedirectUri))
+        {
+            query["redirect_uri"] = _admin.RedeemRedirectUri;
+        }
+        if (query.Count > 0)
+        {
+            emailUrl = QueryHelpers.AddQueryString(emailUrl, query);
+        }
+
+        var client = _httpClientFactory.CreateClient(HttpClientName);
+        using var message = new HttpRequestMessage(HttpMethod.Put, emailUrl)
+        {
+            Content = JsonContent.Create(EmailActions),
+        };
+        message.Headers.Authorization = new AuthenticationHeaderValue("Bearer", adminToken);
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await client.SendAsync(message, ct).ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            throw new InviteException("The Keycloak execute-actions-email endpoint is unreachable.", ex);
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InviteException(
+                    $"The Keycloak execute-actions-email request failed with status {(int)response.StatusCode}.");
+            }
+        }
+    }
 
     private sealed record TokenResponse(
         [property: JsonPropertyName("access_token")] string? AccessToken);
@@ -180,11 +234,5 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
         [property: JsonPropertyName("enabled")] bool Enabled,
         [property: JsonPropertyName("email")] string? Email,
         [property: JsonPropertyName("attributes")] IReadOnlyDictionary<string, string[]> Attributes,
-        [property: JsonPropertyName("requiredActions")] IReadOnlyList<string> RequiredActions,
-        [property: JsonPropertyName("credentials")] IReadOnlyList<CredentialRequest> Credentials);
-
-    private sealed record CredentialRequest(
-        [property: JsonPropertyName("type")] string Type,
-        [property: JsonPropertyName("value")] string Value,
-        [property: JsonPropertyName("temporary")] bool Temporary);
+        [property: JsonPropertyName("requiredActions")] IReadOnlyList<string> RequiredActions);
 }

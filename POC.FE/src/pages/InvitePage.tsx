@@ -53,7 +53,8 @@ function InvitePage(): JSX.Element {
         <CardHeader>
           <CardTitle>Invite a new user</CardTitle>
           <CardDescription>
-            Create a new user from their email. A default password is generated automatically.
+            Enter an email to invite a new user. They receive an email with a single-use link to
+            set their password and sign in.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -89,33 +90,14 @@ function InvitePage(): JSX.Element {
               {state.result.alreadyExisted ? (
                 <p data-testid="invite-already-existed">
                   A user with <span className="font-medium">{state.result.subject}</span> already
-                  existed. No new password was generated.
+                  existed. No invitation email was sent.
                 </p>
               ) : (
-                <>
-                  <p>
-                    Invited <span className="font-medium">{state.result.subject}</span>.
-                  </p>
-                  <p>
-                    Temporary password:{' '}
-                    <code data-testid="generated-password" className="font-mono">
-                      {state.result.generatedPassword}
-                    </code>
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      void navigator.clipboard?.writeText(state.result.generatedPassword)
-                    }
-                  >
-                    Copy password
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    Shown once. Share it securely; the user must change it on first sign-in.
-                  </p>
-                </>
+                <p data-testid="invite-sent">
+                  Invitation email sent to{' '}
+                  <span className="font-medium">{state.result.subject}</span>. They can set their
+                  password via the link in that email.
+                </p>
               )}
             </div>
           )}

@@ -1,6 +1,5 @@
 namespace Poc.Bff.Infrastructure.Tests.Invites;
 
-using System.Collections.Generic;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -8,7 +7,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Poc.Bff.Application.Abstractions;
 using Poc.Bff.Application.Configuration;
 using Poc.Bff.Domain.Invites;
 using Poc.Bff.Infrastructure.Invites;
@@ -16,13 +14,11 @@ using Xunit;
 
 public class EntraInviteProvisionerTests
 {
-    private const string GeneratedPassword = "Aa3!Aa3!Aa3!Aa3!";
-
     private static (EntraInviteProvisioner provisioner, RoutingHandler handler) Build(
-        HttpStatusCode createUserStatus = HttpStatusCode.Created,
+        HttpStatusCode invitationStatus = HttpStatusCode.Created,
         string? clientSecret = "graph-secret")
     {
-        var handler = new RoutingHandler(createUserStatus);
+        var handler = new RoutingHandler(invitationStatus);
         var factory = new StubHttpClientFactory(handler);
 
         var graphOptions = Options.Create(new EntraGraphOptions
@@ -33,7 +29,6 @@ public class EntraInviteProvisionerTests
             TenantId = "tenant-123",
             ClientId = "graph-app",
             ClientSecret = clientSecret,
-            UserDomain = "contoso.onmicrosoft.com",
         });
 
         var authOptions = Options.Create(new AuthOptions
@@ -47,7 +42,6 @@ public class EntraInviteProvisionerTests
 
         var provisioner = new EntraInviteProvisioner(
             factory,
-            new FixedPasswordGenerator(GeneratedPassword),
             graphOptions,
             authOptions,
             NullLogger<EntraInviteProvisioner>.Instance);
@@ -56,36 +50,30 @@ public class EntraInviteProvisionerTests
     }
 
     [Fact]
-    public async Task ProvisionAsync_CreatesMemberUser_WithGeneratedPasswordAndForcedReset()
+    public async Task ProvisionAsync_SendsGuestInvitationEmail_WithRedirectAndMessageFlag()
     {
         var (provisioner, handler) = Build();
 
-        var outcome = await provisioner.ProvisionAsync(new InviteRequest("guest@x.com", "Guest X"));
+        var outcome = await provisioner.ProvisionAsync(new InviteRequest("guest@x.com"));
 
         Assert.Equal("guest@x.com", outcome.Subject);
-        Assert.Equal("https://spa.example", outcome.RedeemUrl);
         Assert.False(outcome.AlreadyExisted);
-        Assert.Equal(GeneratedPassword, outcome.GeneratedPassword);
+        Assert.True(outcome.InvitationSent);
 
-        Assert.NotNull(handler.CreateUserBody);
-        var body = handler.CreateUserBody!.Value;
-        Assert.True(body.GetProperty("accountEnabled").GetBoolean());
-        Assert.Equal("guest@x.com", body.GetProperty("mail").GetString());
-        Assert.Equal("guest@contoso.onmicrosoft.com", body.GetProperty("userPrincipalName").GetString());
-        var passwordProfile = body.GetProperty("passwordProfile");
-        Assert.Equal(GeneratedPassword, passwordProfile.GetProperty("password").GetString());
-        Assert.True(passwordProfile.GetProperty("forceChangePasswordNextSignIn").GetBoolean());
+        Assert.NotNull(handler.InvitationBody);
+        var body = handler.InvitationBody!.Value;
+        Assert.Equal("guest@x.com", body.GetProperty("invitedUserEmailAddress").GetString());
+        Assert.Equal("https://spa.example", body.GetProperty("inviteRedirectUrl").GetString());
+        Assert.True(body.GetProperty("sendInvitationMessage").GetBoolean());
     }
 
     [Fact]
-    public async Task ProvisionAsync_WhenUserAlreadyExists_ReturnsAlreadyExisted_WithoutPassword()
+    public async Task ProvisionAsync_WhenInvitationFails_ThrowsInviteException()
     {
-        var (provisioner, _) = Build(createUserStatus: HttpStatusCode.Conflict);
+        var (provisioner, _) = Build(invitationStatus: HttpStatusCode.BadRequest);
 
-        var outcome = await provisioner.ProvisionAsync(new InviteRequest("guest@x.com"));
-
-        Assert.True(outcome.AlreadyExisted);
-        Assert.Equal(string.Empty, outcome.GeneratedPassword);
+        await Assert.ThrowsAsync<InviteException>(
+            () => provisioner.ProvisionAsync(new InviteRequest("guest@x.com")));
     }
 
     [Fact]
@@ -97,9 +85,9 @@ public class EntraInviteProvisionerTests
             () => provisioner.ProvisionAsync(new InviteRequest("guest@x.com")));
     }
 
-    private sealed class RoutingHandler(HttpStatusCode createUserStatus) : HttpMessageHandler
+    private sealed class RoutingHandler(HttpStatusCode invitationStatus) : HttpMessageHandler
     {
-        public JsonElement? CreateUserBody { get; private set; }
+        public JsonElement? InvitationBody { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken ct)
@@ -114,10 +102,10 @@ public class EntraInviteProvisionerTests
                 };
             }
 
-            if (path.EndsWith("/users", StringComparison.Ordinal))
+            if (path.EndsWith("/invitations", StringComparison.Ordinal))
             {
-                CreateUserBody = await request.Content!.ReadFromJsonAsync<JsonElement>(ct);
-                return new HttpResponseMessage(createUserStatus);
+                InvitationBody = await request.Content!.ReadFromJsonAsync<JsonElement>(ct);
+                return new HttpResponseMessage(invitationStatus);
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -127,10 +115,5 @@ public class EntraInviteProvisionerTests
     private sealed class StubHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
-    }
-
-    private sealed class FixedPasswordGenerator(string password) : IPasswordGenerator
-    {
-        public string Generate() => password;
     }
 }

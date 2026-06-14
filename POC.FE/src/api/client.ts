@@ -76,9 +76,8 @@ export async function fetchMessage(): Promise<string> {
 
 export interface InviteResult {
   readonly subject: string;
-  readonly redeemUrl: string;
   readonly alreadyExisted: boolean;
-  readonly generatedPassword: string;
+  readonly invitationSent: boolean;
 }
 
 function asInviteResult(body: unknown): InviteResult | null {
@@ -86,19 +85,16 @@ function asInviteResult(body: unknown): InviteResult | null {
     typeof body === 'object' &&
     body !== null &&
     'subject' in body &&
-    'redeemUrl' in body &&
     'alreadyExisted' in body &&
-    'generatedPassword' in body &&
+    'invitationSent' in body &&
     typeof (body as { subject: unknown }).subject === 'string' &&
-    typeof (body as { redeemUrl: unknown }).redeemUrl === 'string' &&
     typeof (body as { alreadyExisted: unknown }).alreadyExisted === 'boolean' &&
-    typeof (body as { generatedPassword: unknown }).generatedPassword === 'string'
+    typeof (body as { invitationSent: unknown }).invitationSent === 'boolean'
   ) {
     return {
       subject: (body as { subject: string }).subject,
-      redeemUrl: (body as { redeemUrl: string }).redeemUrl,
       alreadyExisted: (body as { alreadyExisted: boolean }).alreadyExisted,
-      generatedPassword: (body as { generatedPassword: string }).generatedPassword,
+      invitationSent: (body as { invitationSent: boolean }).invitationSent,
     };
   }
   return null;

@@ -9,6 +9,15 @@
   "editUsernameAllowed": false,
   "defaultSignatureAlgorithm": "RS256",
   "accessTokenLifespan": 600,
+  "smtpServer": {
+    "host": "mailhog",
+    "port": "1025",
+    "from": "no-reply@poc.local",
+    "fromDisplayName": "POC Invitations",
+    "ssl": "false",
+    "starttls": "false",
+    "auth": "false"
+  },
   "roles": {
     "realm": [
       {

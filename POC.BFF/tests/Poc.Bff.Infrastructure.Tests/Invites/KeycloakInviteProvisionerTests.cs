@@ -1,5 +1,6 @@
 namespace Poc.Bff.Infrastructure.Tests.Invites;
 
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -7,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Poc.Bff.Application.Abstractions;
 using Poc.Bff.Application.Configuration;
 using Poc.Bff.Domain.Invites;
 using Poc.Bff.Infrastructure.Invites;
@@ -15,7 +15,7 @@ using Xunit;
 
 public class KeycloakInviteProvisionerTests
 {
-    private const string GeneratedPassword = "Zz9!Zz9!Zz9!Zz9!";
+    private const string NewUserId = "abc-123";
 
     private static (KeycloakInviteProvisioner provisioner, RoutingHandler handler) Build(
         HttpStatusCode createUserStatus = HttpStatusCode.Created,
@@ -30,6 +30,8 @@ public class KeycloakInviteProvisionerTests
             Realm = "poc",
             AdminClientId = "poc-admin-cli",
             AdminClientSecret = adminSecret,
+            RedeemClientId = "poc-spa",
+            RedeemRedirectUri = "https://localhost:5173",
         });
 
         var inviteOptions = Options.Create(new InviteOptions
@@ -41,7 +43,6 @@ public class KeycloakInviteProvisionerTests
 
         var provisioner = new KeycloakInviteProvisioner(
             factory,
-            new FixedPasswordGenerator(GeneratedPassword),
             adminOptions,
             inviteOptions,
             NullLogger<KeycloakInviteProvisioner>.Instance);
@@ -50,7 +51,7 @@ public class KeycloakInviteProvisionerTests
     }
 
     [Fact]
-    public async Task ProvisionAsync_CreatesUser_WithGeneratedTemporaryPasswordAndUpdateAction()
+    public async Task ProvisionAsync_CreatesUserWithoutCredentials_ThenSendsActionsEmail()
     {
         var (provisioner, handler) = Build();
 
@@ -58,26 +59,36 @@ public class KeycloakInviteProvisionerTests
 
         Assert.Equal("erin@example.com", outcome.Subject);
         Assert.False(outcome.AlreadyExisted);
-        Assert.Equal(GeneratedPassword, outcome.GeneratedPassword);
+        Assert.True(outcome.InvitationSent);
 
+        // The create-user body carries no credential — the invited user sets their own password.
         Assert.NotNull(handler.CreateUserBody);
-        var body = handler.CreateUserBody!.Value;
-        var credential = body.GetProperty("credentials")[0];
-        Assert.Equal("password", credential.GetProperty("type").GetString());
-        Assert.Equal(GeneratedPassword, credential.GetProperty("value").GetString());
-        Assert.True(credential.GetProperty("temporary").GetBoolean());
-        Assert.Equal("UPDATE_PASSWORD", body.GetProperty("requiredActions")[0].GetString());
+        Assert.False(handler.CreateUserBody!.Value.TryGetProperty("credentials", out _));
+        Assert.Equal(
+            "UPDATE_PASSWORD",
+            handler.CreateUserBody.Value.GetProperty("requiredActions")[0].GetString());
+
+        // The single-use action email was triggered for the created user, scoped to the redeem client.
+        Assert.NotNull(handler.ActionsEmailRequestUri);
+        Assert.Contains($"/users/{NewUserId}/execute-actions-email", handler.ActionsEmailRequestUri!);
+        Assert.Contains("client_id=poc-spa", handler.ActionsEmailRequestUri);
+        Assert.Contains("redirect_uri=https", handler.ActionsEmailRequestUri);
+        Assert.NotNull(handler.ActionsEmailBody);
+        var actions = handler.ActionsEmailBody!.Value;
+        Assert.Equal("UPDATE_PASSWORD", actions[0].GetString());
+        Assert.Equal("VERIFY_EMAIL", actions[1].GetString());
     }
 
     [Fact]
-    public async Task ProvisionAsync_WhenUserAlreadyExists_ReturnsAlreadyExisted_WithoutPassword()
+    public async Task ProvisionAsync_WhenUserAlreadyExists_ReturnsAlreadyExisted_AndSendsNoEmail()
     {
-        var (provisioner, _) = Build(createUserStatus: HttpStatusCode.Conflict);
+        var (provisioner, handler) = Build(createUserStatus: HttpStatusCode.Conflict);
 
         var outcome = await provisioner.ProvisionAsync(new InviteRequest("erin@example.com"));
 
         Assert.True(outcome.AlreadyExisted);
-        Assert.Equal(string.Empty, outcome.GeneratedPassword);
+        Assert.False(outcome.InvitationSent);
+        Assert.Null(handler.ActionsEmailRequestUri);
     }
 
     [Fact]
@@ -92,11 +103,14 @@ public class KeycloakInviteProvisionerTests
     private sealed class RoutingHandler(HttpStatusCode createUserStatus) : HttpMessageHandler
     {
         public JsonElement? CreateUserBody { get; private set; }
+        public string? ActionsEmailRequestUri { get; private set; }
+        public JsonElement? ActionsEmailBody { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken ct)
         {
-            var path = request.RequestUri!.AbsolutePath;
+            var uri = request.RequestUri!;
+            var path = uri.AbsolutePath;
 
             if (path.EndsWith("/token", StringComparison.Ordinal))
             {
@@ -106,10 +120,23 @@ public class KeycloakInviteProvisionerTests
                 };
             }
 
+            if (path.EndsWith("/execute-actions-email", StringComparison.Ordinal))
+            {
+                ActionsEmailRequestUri = uri.ToString();
+                ActionsEmailBody = await request.Content!.ReadFromJsonAsync<JsonElement>(ct);
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
+
             if (path.EndsWith("/users", StringComparison.Ordinal))
             {
                 CreateUserBody = await request.Content!.ReadFromJsonAsync<JsonElement>(ct);
-                return new HttpResponseMessage(createUserStatus);
+                var response = new HttpResponseMessage(createUserStatus);
+                if (createUserStatus == HttpStatusCode.Created)
+                {
+                    response.Headers.Location =
+                        new Uri($"https://keycloak.example/admin/realms/poc/users/{NewUserId}");
+                }
+                return response;
             }
 
             return new HttpResponseMessage(HttpStatusCode.NotFound);
@@ -119,10 +146,5 @@ public class KeycloakInviteProvisionerTests
     private sealed class StubHttpClientFactory(HttpMessageHandler handler) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new(handler, disposeHandler: false);
-    }
-
-    private sealed class FixedPasswordGenerator(string password) : IPasswordGenerator
-    {
-        public string Generate() => password;
     }
 }

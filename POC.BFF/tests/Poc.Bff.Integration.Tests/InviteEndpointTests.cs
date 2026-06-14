@@ -83,7 +83,7 @@ public class InviteEndpointTests : IClassFixture<InviteEndpointTests.InviteFacto
         Assert.NotNull(body);
         Assert.Equal("erin@example.com", body!.Subject);
         Assert.False(body.AlreadyExisted);
-        Assert.Equal("Stub-Generated-Pw-1!", body.GeneratedPassword);
+        Assert.True(body.InvitationSent);
     }
 
     [Fact]
@@ -105,7 +105,7 @@ public class InviteEndpointTests : IClassFixture<InviteEndpointTests.InviteFacto
         Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
     }
 
-    private sealed record InviteBody(string Subject, string RedeemUrl, bool AlreadyExisted, string GeneratedPassword);
+    private sealed record InviteBody(string Subject, bool AlreadyExisted, bool InvitationSent);
 
     public sealed class InviteFactory : BffWebApplicationFactory
     {
@@ -158,8 +158,7 @@ public class InviteEndpointTests : IClassFixture<InviteEndpointTests.InviteFacto
         public Task<InviteOutcome> ProvisionAsync(InviteRequest request, CancellationToken ct = default) =>
             Task.FromResult(new InviteOutcome(
                 Subject: request.Username,
-                RedeemUrl: "https://invite.stub/redeem/x",
                 AlreadyExisted: false,
-                GeneratedPassword: "Stub-Generated-Pw-1!"));
+                InvitationSent: true));
     }
 }

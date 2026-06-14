@@ -48,35 +48,32 @@ describe('InvitePage', () => {
     expect(screen.queryByLabelText('New user email')).not.toBeInTheDocument();
   });
 
-  it('lets a manager invite a user and shows the generated password', async () => {
+  it('lets a manager invite a user and confirms the email was sent', async () => {
     mockCreateInvite.mockResolvedValue({
       subject: 'erin@example.com',
-      redeemUrl: 'https://idp/account',
       alreadyExisted: false,
-      generatedPassword: 'Gx7!kP2m-Qa9Zz1!',
+      invitationSent: true,
     });
     renderPage();
 
     submitEmail('erin@example.com');
 
-    expect(await screen.findByTestId('invite-success')).toBeInTheDocument();
-    expect(screen.getByTestId('generated-password')).toHaveTextContent('Gx7!kP2m-Qa9Zz1!');
+    expect(await screen.findByTestId('invite-sent')).toHaveTextContent('erin@example.com');
     expect(mockCreateInvite).toHaveBeenCalledWith('erin@example.com');
   });
 
-  it('reports an already-existing user without a password', async () => {
+  it('reports an already-existing user without sending an email', async () => {
     mockCreateInvite.mockResolvedValue({
       subject: 'erin@example.com',
-      redeemUrl: 'https://idp/account',
       alreadyExisted: true,
-      generatedPassword: '',
+      invitationSent: false,
     });
     renderPage();
 
     submitEmail('erin@example.com');
 
     expect(await screen.findByTestId('invite-already-existed')).toBeInTheDocument();
-    expect(screen.queryByTestId('generated-password')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('invite-sent')).not.toBeInTheDocument();
   });
 
   it('shows an error when the invite fails', async () => {

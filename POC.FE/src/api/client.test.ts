@@ -62,17 +62,15 @@ describe('createInvite', () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
         subject: 'erin@example.com',
-        redeemUrl: 'https://idp/account',
         alreadyExisted: false,
-        generatedPassword: 'Gx7!kP2m-Qa9Zz1!',
+        invitationSent: true,
       }),
     );
 
     await expect(createInvite('erin@example.com')).resolves.toEqual({
       subject: 'erin@example.com',
-      redeemUrl: 'https://idp/account',
       alreadyExisted: false,
-      generatedPassword: 'Gx7!kP2m-Qa9Zz1!',
+      invitationSent: true,
     });
 
     const [url, init] = fetchMock.mock.calls[0];

@@ -1,6 +1,5 @@
 namespace Poc.Bff.Infrastructure.Invites;
 
-using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
@@ -11,36 +10,31 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// PROD invite path: creates a member user in Azure Entra via Microsoft Graph
-/// (<c>POST /users</c>) with an auto-generated default password and
-/// <c>forceChangePasswordNextSignIn</c>, using a client-credentials Graph token.
-/// Structurally parallel to <see cref="KeycloakInviteProvisioner"/>.
+/// PROD invite path: sends an Azure Entra B2B guest invitation via Microsoft Graph
+/// (<c>POST /invitations</c>, <c>sendInvitationMessage:true</c>) so the invited user receives
+/// an email containing a single-use redeem URL. No password is ever generated or returned.
 /// </summary>
 public sealed class EntraInviteProvisioner : IInviteProvisioner
 {
     public const string HttpClientName = "EntraGraph";
 
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IPasswordGenerator _passwordGenerator;
     private readonly ILogger<EntraInviteProvisioner> _logger;
     private readonly EntraGraphOptions _graph;
     private readonly string _frontendReturnUrl;
 
     public EntraInviteProvisioner(
         IHttpClientFactory httpClientFactory,
-        IPasswordGenerator passwordGenerator,
         IOptions<EntraGraphOptions> graphOptions,
         IOptions<AuthOptions> authOptions,
         ILogger<EntraInviteProvisioner> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
-        ArgumentNullException.ThrowIfNull(passwordGenerator);
         ArgumentNullException.ThrowIfNull(graphOptions);
         ArgumentNullException.ThrowIfNull(authOptions);
         ArgumentNullException.ThrowIfNull(logger);
 
         _httpClientFactory = httpClientFactory;
-        _passwordGenerator = passwordGenerator;
         _graph = graphOptions.Value;
         _frontendReturnUrl = authOptions.Value.FrontendReturnUrl;
         _logger = logger;
@@ -59,7 +53,7 @@ public sealed class EntraInviteProvisioner : IInviteProvisioner
         }
 
         var graphToken = await GetGraphTokenAsync(ct).ConfigureAwait(false);
-        return await CreateUserAsync(graphToken, request, ct).ConfigureAwait(false);
+        return await SendInvitationAsync(graphToken, request, ct).ConfigureAwait(false);
     }
 
     private async Task<string> GetGraphTokenAsync(CancellationToken ct)
@@ -104,28 +98,20 @@ public sealed class EntraInviteProvisioner : IInviteProvisioner
         }
     }
 
-    private async Task<InviteOutcome> CreateUserAsync(
+    private async Task<InviteOutcome> SendInvitationAsync(
         string graphToken,
         InviteRequest request,
         CancellationToken ct)
     {
-        var usersUrl = $"{_graph.BaseUrl.TrimEnd('/')}/users";
+        var invitationsUrl = $"{_graph.BaseUrl.TrimEnd('/')}/invitations";
 
-        var generatedPassword = _passwordGenerator.Generate();
-        var mailNickname = MailNickname(request.Username);
-
-        var body = new CreateUserRequest(
-            AccountEnabled: true,
-            DisplayName: request.DisplayName ?? request.Username,
-            MailNickname: mailNickname,
-            UserPrincipalName: $"{mailNickname}@{_graph.UserDomain}",
-            Mail: request.Username,
-            PasswordProfile: new PasswordProfile(
-                Password: generatedPassword,
-                ForceChangePasswordNextSignIn: true));
+        var body = new GraphInvitation(
+            InvitedUserEmailAddress: request.Username,
+            InviteRedirectUrl: _frontendReturnUrl,
+            SendInvitationMessage: true);
 
         var client = _httpClientFactory.CreateClient(HttpClientName);
-        using var message = new HttpRequestMessage(HttpMethod.Post, usersUrl)
+        using var message = new HttpRequestMessage(HttpMethod.Post, invitationsUrl)
         {
             Content = JsonContent.Create(body),
         };
@@ -138,54 +124,27 @@ public sealed class EntraInviteProvisioner : IInviteProvisioner
         }
         catch (HttpRequestException ex)
         {
-            throw new InviteException("The Entra Graph users endpoint is unreachable.", ex);
+            throw new InviteException("The Entra Graph invitations endpoint is unreachable.", ex);
         }
 
         using (response)
         {
-            if (response.StatusCode == HttpStatusCode.Conflict)
-            {
-                _logger.LogInformation("Entra invite: the user already existed (idempotent re-invite).");
-                return new InviteOutcome(
-                    request.Username,
-                    _frontendReturnUrl,
-                    AlreadyExisted: true,
-                    GeneratedPassword: string.Empty);
-            }
-
             if (!response.IsSuccessStatusCode)
             {
                 throw new InviteException(
-                    $"The Entra Graph create-user request failed with status {(int)response.StatusCode}.");
+                    $"The Entra Graph invitation request failed with status {(int)response.StatusCode}.");
             }
 
-            _logger.LogInformation("Entra invite: provisioned a new member user (force password change on first sign-in).");
-            return new InviteOutcome(
-                request.Username,
-                _frontendReturnUrl,
-                AlreadyExisted: false,
-                GeneratedPassword: generatedPassword);
+            _logger.LogInformation("Entra invite: sent a B2B guest invitation email (single-use redeem URL).");
+            return new InviteOutcome(request.Username, AlreadyExisted: false, InvitationSent: true);
         }
-    }
-
-    private static string MailNickname(string email)
-    {
-        var at = email.IndexOf('@', StringComparison.Ordinal);
-        return at > 0 ? email[..at] : email;
     }
 
     private sealed record TokenResponse(
         [property: JsonPropertyName("access_token")] string? AccessToken);
 
-    private sealed record CreateUserRequest(
-        [property: JsonPropertyName("accountEnabled")] bool AccountEnabled,
-        [property: JsonPropertyName("displayName")] string DisplayName,
-        [property: JsonPropertyName("mailNickname")] string MailNickname,
-        [property: JsonPropertyName("userPrincipalName")] string UserPrincipalName,
-        [property: JsonPropertyName("mail")] string Mail,
-        [property: JsonPropertyName("passwordProfile")] PasswordProfile PasswordProfile);
-
-    private sealed record PasswordProfile(
-        [property: JsonPropertyName("password")] string Password,
-        [property: JsonPropertyName("forceChangePasswordNextSignIn")] bool ForceChangePasswordNextSignIn);
+    private sealed record GraphInvitation(
+        [property: JsonPropertyName("invitedUserEmailAddress")] string InvitedUserEmailAddress,
+        [property: JsonPropertyName("inviteRedirectUrl")] string InviteRedirectUrl,
+        [property: JsonPropertyName("sendInvitationMessage")] bool SendInvitationMessage);
 }

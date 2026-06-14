@@ -70,8 +70,6 @@ public static class DependencyInjection
         services.AddSingleton<ConfigRoleResolver>();
         services.AddSingleton<IRoleResolver, InviteAwareRoleResolver>();
 
-        services.AddSingleton<IPasswordGenerator, CryptoPasswordGenerator>();
-
         services.AddSingleton<IInviteStore, InMemoryInviteStore>();
         if (string.Equals(env, "PROD", StringComparison.OrdinalIgnoreCase))
         {
