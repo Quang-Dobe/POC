@@ -15,7 +15,7 @@ OIDC issuer. So the published port 8080 serves **HTTPS**.
 ```
 POC.KeyCloak/
   docker-compose.yml    keycloak 24.0, start-dev --import-realm, HTTPS :8080 (+ internal http :8081)
-  realm-export.json     realm `poc`: clients poc-bff / poc-spa / poc-admin-cli,
+  realm-export.json     realm `poc`: clients poc-bff / poc-admin-cli,
                         roles reader + manager, users alice + bob + service account
   certs/                dev-cert.pfx (gitignored — regenerate per machine)
 ```
@@ -30,7 +30,6 @@ registration disabled, login-with-email allowed.
 | clientId | Type | Flows | redirectUri / webOrigins | Notes |
 |---|---|---|---|---|
 | `poc-bff` | public (PKCE-only, no secret) | standard flow (auth code) | `https://localhost:5000/auth/callback` / `https://localhost:5000` | The BFF's server-side OIDC login client. `pkce.code.challenge.method=S256`, post-logout `https://localhost:5000/*`. Default scopes `profile`, `email`. BFF validates `aud==poc-bff`. |
-| `poc-spa` | public (PKCE) | standard flow + direct access grants | `https://localhost:5173/*` / `https://localhost:5173` | SPA direct-PKCE client. Default scopes `profile`, `email`. |
 | `poc-admin-cli` | confidential (service account) | client_credentials only | — | Used by the BFF for the Keycloak Admin REST invite flow. Service account holds `realm-management` roles `manage-users` + `view-users` (least privilege). The realm file carries a DEV secret `poc-admin-cli-dev-secret`; in the BFF this secret is read from the store seam (`Keycloak--AdminClientSecret`), not committed config. |
 
 **Realm roles**

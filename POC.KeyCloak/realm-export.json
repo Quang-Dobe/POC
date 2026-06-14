@@ -145,32 +145,6 @@
       "optionalClientScopes": []
     },
     {
-      "clientId": "poc-spa",
-      "name": "POC.FE SPA (public PKCE client)",
-      "enabled": true,
-      "publicClient": true,
-      "standardFlowEnabled": true,
-      "directAccessGrantsEnabled": true,
-      "implicitFlowEnabled": false,
-      "serviceAccountsEnabled": false,
-      "protocol": "openid-connect",
-      "redirectUris": [
-        "https://localhost:5173/*"
-      ],
-      "webOrigins": [
-        "https://localhost:5173"
-      ],
-      "attributes": {
-        "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "https://localhost:5173/*"
-      },
-      "defaultClientScopes": [
-        "profile",
-        "email"
-      ],
-      "optionalClientScopes": []
-    },
-    {
       "clientId": "poc-admin-cli",
       "name": "POC.BFF invite admin (client_credentials, least-privilege manage-users/view-users)",
       "description": "Task 3: confidential service-account client for the Keycloak Admin REST invite flow. Secret read from the store seam (Keycloak--AdminClientSecret), not this file. Least privilege: manage-users + view-users only.",

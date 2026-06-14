@@ -1,18 +1,18 @@
-param([switch]$Volumes)
-
 $ErrorActionPreference = "Continue"
-$root = $PSScriptRoot
-$envFile = Join-Path $root ".env.dev"
-$envArgs = (Test-Path $envFile) ? @("--env-file", $envFile) : @()
-$downArgs = $Volumes ? @("down", "-v") : @("down")
+Set-Location $PSScriptRoot
 
-foreach ($f in @(
-  "POC.Agent\docker-compose.yml",
-  "infra\dev\docker-compose.yml",
-  "POC.KeyCloak\docker-compose.yml",
-  "POC.OpenBao\docker-compose.yml"
-)) {
-  Write-Host "==> down $f" -ForegroundColor Cyan
-  docker compose -f (Join-Path $root $f) @envArgs @downArgs
-}
+# Reverse of dev-up: Agent -> FE+BFF -> Keycloak -> OpenBao.
+# (DAB is a host process, no container to bring down.)
+Write-Host "==> down Agent Gateway" -ForegroundColor Cyan
+docker compose -f "POC.Agent\docker-compose.yml" --env-file ".env.dev" down
+
+Write-Host "==> down Backend + Frontend" -ForegroundColor Cyan
+docker compose -f "infra\dev\docker-compose.yml" --env-file ".env.dev" down
+
+Write-Host "==> down Keycloak" -ForegroundColor Cyan
+docker compose -f "POC.KeyCloak\docker-compose.yml" --env-file ".env.dev" down
+
+Write-Host "==> down OpenBAO" -ForegroundColor Cyan
+docker compose -f "POC.OpenBao\docker-compose.yml" --env-file ".env.dev" down
+
 Write-Host "DEV docker stack is DOWN." -ForegroundColor Green
