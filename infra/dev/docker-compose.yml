@@ -9,11 +9,26 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       BAO_TOKEN: ${BAO_TOKEN}
       Auth__Authority: ${AUTH_AUTHORITY}
+      Auth__RedirectUri: ${AUTH_REDIRECT_URI}
+      Auth__FrontendReturnUrl: ${AUTH_FRONTEND_RETURN_URL}
+      Auth__ClientId: ${AUTH_BFF_CLIENT_ID}
       Vault__Address: ${VAULT_ADDRESS}
       Cors__SpaOrigin: ${CORS_SPA_ORIGIN}
       Agent__Host: ${AGENT_HOST}
       Agent__Port: ${AGENT_PORT}
-      Session__RedisAddress: "redis:6379"
+      Session__CookieName: ${SESSION_COOKIE_NAME}
+      Session__TtlMinutes: ${SESSION_TTL_MINUTES}
+      Session__RedisAddress: ${SESSION_REDIS_ADDRESS}
+      DataProtection__ApplicationName: ${DATA_PROTECTION_APPLICATION_NAME}
+      DataProtection__RedisKey: ${DATA_PROTECTION_REDIS_KEY}
+      IdpSimulator__Issuer: ${IDP_SIMULATOR_ISSUER}
+      IdpSimulator__Audience: ${IDP_SIMULATOR_AUDIENCE}
+      IdpSimulator__DownstreamTokenTtlSeconds: ${IDP_SIMULATOR_DOWNSTREAM_TOKEN_TTL_SECONDS}
+      IdpSimulator__SigningKeyId: ${IDP_SIMULATOR_SIGNING_KEY_ID}
+      Invite__TenantId: ${TENANT_ID}
+      Keycloak__AdminBaseUrl: https://${KEYCLOAK_HOST}:${KEYCLOAK_PORT}
+      Keycloak__Realm: ${TENANT_ID}
+      Keycloak__AdminClientId: ${KEYCLOAK_ADMIN_CLIENT_ID}
       ASPNETCORE_URLS: https://+:8081
       ASPNETCORE_Kestrel__Certificates__Default__Path: /certs/dev-tls.crt
       ASPNETCORE_Kestrel__Certificates__Default__KeyPath: /certs/dev-tls.key
@@ -30,7 +45,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT}:${REDIS_PORT}"
 
   frontend:
     build:

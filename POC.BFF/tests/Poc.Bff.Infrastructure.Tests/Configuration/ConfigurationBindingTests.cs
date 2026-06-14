@@ -41,7 +41,6 @@ public class ConfigurationBindingTests
         Assert.Equal("https://localhost:8080/realms/poc", auth.Authority);
         Assert.Contains("/realms/", auth.Authority);
         Assert.DoesNotContain("/v2.0", auth.Authority);
-        Assert.Equal("poc-api", auth.Audience);
     }
 
     [Fact]
@@ -54,7 +53,6 @@ public class ConfigurationBindingTests
         Assert.EndsWith("/v2.0", auth.Authority);
         Assert.StartsWith("https://login.microsoftonline.com/", auth.Authority);
         Assert.DoesNotContain("/realms/", auth.Authority);
-        Assert.StartsWith("api://", auth.Audience);
     }
 
     [Theory]

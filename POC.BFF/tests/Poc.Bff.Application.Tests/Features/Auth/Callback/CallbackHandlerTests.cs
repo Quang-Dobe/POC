@@ -32,7 +32,6 @@ public class CallbackHandlerTests
         _authOptions = Options.Create(new AuthOptions
         {
             Authority = "https://idp.example",
-            Audience = "bff",
             ClientId = "bff-client",
             RedirectUri = "https://bff.example/auth/callback",
             FrontendReturnUrl = FrontendReturnUrl,

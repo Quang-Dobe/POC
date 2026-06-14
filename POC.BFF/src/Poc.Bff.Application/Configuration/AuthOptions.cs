@@ -10,11 +10,6 @@ public sealed class AuthOptions
     public string Authority { get; init; } = default!;
 
     [Required]
-    public string Audience { get; init; } = default!;
-
-    public bool RequireHttpsMetadata { get; init; } = true;
-
-    [Required]
     public string ClientId { get; init; } = default!;
 
     [Required]

@@ -47,7 +47,6 @@ public class BffWebApplicationFactory : WebApplicationFactory<Program>
         ["IdpSimulator:SigningKeyPem"] = _signingKeyPem,
 
         ["Auth:Authority"] = "https://idp.test.local",
-        ["Auth:Audience"] = "poc-bff",
         ["Auth:ClientId"] = "poc-bff-client",
         ["Auth:RedirectUri"] = "https://bff.test.local/auth/callback",
         ["Auth:FrontendReturnUrl"] = "https://bff.test.local",
