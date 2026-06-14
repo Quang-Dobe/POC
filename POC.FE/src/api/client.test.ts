@@ -4,7 +4,7 @@ vi.mock('@/config', () => ({
   config: { apiBaseUrl: 'https://api.test' },
 }));
 
-import { ApiError, UnauthorizedError, askAgent, fetchMessage } from '@/api/client';
+import { ApiError, UnauthorizedError, askAgent, createInvite, fetchMessage } from '@/api/client';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -53,6 +53,53 @@ describe('fetchMessage', () => {
     vi.mocked(fetch).mockResolvedValue(jsonResponse({ notMessage: 1 }));
 
     await expect(fetchMessage()).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('createInvite', () => {
+  it('POSTs the email as username with credentials:include and parses the result', async () => {
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValue(
+      jsonResponse({
+        subject: 'erin@example.com',
+        redeemUrl: 'https://idp/account',
+        alreadyExisted: false,
+        generatedPassword: 'Gx7!kP2m-Qa9Zz1!',
+      }),
+    );
+
+    await expect(createInvite('erin@example.com')).resolves.toEqual({
+      subject: 'erin@example.com',
+      redeemUrl: 'https://idp/account',
+      alreadyExisted: false,
+      generatedPassword: 'Gx7!kP2m-Qa9Zz1!',
+    });
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://api.test/auth/invite');
+    expect((init as RequestInit).method).toBe('POST');
+    expect((init as RequestInit).credentials).toBe('include');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      username: 'erin@example.com',
+    });
+  });
+
+  it('throws UnauthorizedError on a 401', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({}, 401));
+
+    await expect(createInvite('erin@example.com')).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  it('throws ApiError on a 403 (non-manager)', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({}, 403));
+
+    await expect(createInvite('erin@example.com')).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('throws ApiError when the response shape is unexpected', async () => {
+    vi.mocked(fetch).mockResolvedValue(jsonResponse({ subject: 'only' }));
+
+    await expect(createInvite('erin@example.com')).rejects.toBeInstanceOf(ApiError);
   });
 });
 

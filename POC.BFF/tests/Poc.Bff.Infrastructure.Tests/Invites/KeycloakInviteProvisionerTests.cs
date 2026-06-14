@@ -1,6 +1,5 @@
 namespace Poc.Bff.Infrastructure.Tests.Invites;
 
-using System.Collections.Generic;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
@@ -14,67 +13,60 @@ using Poc.Bff.Domain.Invites;
 using Poc.Bff.Infrastructure.Invites;
 using Xunit;
 
-public class EntraInviteProvisionerTests
+public class KeycloakInviteProvisionerTests
 {
-    private const string GeneratedPassword = "Aa3!Aa3!Aa3!Aa3!";
+    private const string GeneratedPassword = "Zz9!Zz9!Zz9!Zz9!";
 
-    private static (EntraInviteProvisioner provisioner, RoutingHandler handler) Build(
+    private static (KeycloakInviteProvisioner provisioner, RoutingHandler handler) Build(
         HttpStatusCode createUserStatus = HttpStatusCode.Created,
-        string? clientSecret = "graph-secret")
+        string? adminSecret = "admin-secret")
     {
         var handler = new RoutingHandler(createUserStatus);
         var factory = new StubHttpClientFactory(handler);
 
-        var graphOptions = Options.Create(new EntraGraphOptions
+        var adminOptions = Options.Create(new KeycloakAdminOptions
         {
-            BaseUrl = "https://graph.microsoft.com/v1.0",
-            Authority = "https://login.microsoftonline.com",
-            Scope = "https://graph.microsoft.com/.default",
-            TenantId = "tenant-123",
-            ClientId = "graph-app",
-            ClientSecret = clientSecret,
-            UserDomain = "contoso.onmicrosoft.com",
+            AdminBaseUrl = "https://keycloak.example",
+            Realm = "poc",
+            AdminClientId = "poc-admin-cli",
+            AdminClientSecret = adminSecret,
         });
 
-        var authOptions = Options.Create(new AuthOptions
+        var inviteOptions = Options.Create(new InviteOptions
         {
-            Authority = "https://login.microsoftonline.com/tenant/v2.0",
-            Audience = "api://x",
-            ClientId = "bff",
-            RedirectUri = "https://bff/auth/callback",
-            FrontendReturnUrl = "https://spa.example",
+            DefaultRoles = new[] { "reader" },
+            DefaultRegion = "Manhattan County",
+            TenantId = "poc",
         });
 
-        var provisioner = new EntraInviteProvisioner(
+        var provisioner = new KeycloakInviteProvisioner(
             factory,
             new FixedPasswordGenerator(GeneratedPassword),
-            graphOptions,
-            authOptions,
-            NullLogger<EntraInviteProvisioner>.Instance);
+            adminOptions,
+            inviteOptions,
+            NullLogger<KeycloakInviteProvisioner>.Instance);
 
         return (provisioner, handler);
     }
 
     [Fact]
-    public async Task ProvisionAsync_CreatesMemberUser_WithGeneratedPasswordAndForcedReset()
+    public async Task ProvisionAsync_CreatesUser_WithGeneratedTemporaryPasswordAndUpdateAction()
     {
         var (provisioner, handler) = Build();
 
-        var outcome = await provisioner.ProvisionAsync(new InviteRequest("guest@x.com", "Guest X"));
+        var outcome = await provisioner.ProvisionAsync(new InviteRequest("erin@example.com"));
 
-        Assert.Equal("guest@x.com", outcome.Subject);
-        Assert.Equal("https://spa.example", outcome.RedeemUrl);
+        Assert.Equal("erin@example.com", outcome.Subject);
         Assert.False(outcome.AlreadyExisted);
         Assert.Equal(GeneratedPassword, outcome.GeneratedPassword);
 
         Assert.NotNull(handler.CreateUserBody);
         var body = handler.CreateUserBody!.Value;
-        Assert.True(body.GetProperty("accountEnabled").GetBoolean());
-        Assert.Equal("guest@x.com", body.GetProperty("mail").GetString());
-        Assert.Equal("guest@contoso.onmicrosoft.com", body.GetProperty("userPrincipalName").GetString());
-        var passwordProfile = body.GetProperty("passwordProfile");
-        Assert.Equal(GeneratedPassword, passwordProfile.GetProperty("password").GetString());
-        Assert.True(passwordProfile.GetProperty("forceChangePasswordNextSignIn").GetBoolean());
+        var credential = body.GetProperty("credentials")[0];
+        Assert.Equal("password", credential.GetProperty("type").GetString());
+        Assert.Equal(GeneratedPassword, credential.GetProperty("value").GetString());
+        Assert.True(credential.GetProperty("temporary").GetBoolean());
+        Assert.Equal("UPDATE_PASSWORD", body.GetProperty("requiredActions")[0].GetString());
     }
 
     [Fact]
@@ -82,19 +74,19 @@ public class EntraInviteProvisionerTests
     {
         var (provisioner, _) = Build(createUserStatus: HttpStatusCode.Conflict);
 
-        var outcome = await provisioner.ProvisionAsync(new InviteRequest("guest@x.com"));
+        var outcome = await provisioner.ProvisionAsync(new InviteRequest("erin@example.com"));
 
         Assert.True(outcome.AlreadyExisted);
         Assert.Equal(string.Empty, outcome.GeneratedPassword);
     }
 
     [Fact]
-    public async Task ProvisionAsync_WhenClientSecretMissing_ThrowsInviteException()
+    public async Task ProvisionAsync_WhenAdminSecretMissing_ThrowsInviteException()
     {
-        var (provisioner, _) = Build(clientSecret: null);
+        var (provisioner, _) = Build(adminSecret: null);
 
         await Assert.ThrowsAsync<InviteException>(
-            () => provisioner.ProvisionAsync(new InviteRequest("guest@x.com")));
+            () => provisioner.ProvisionAsync(new InviteRequest("erin@example.com")));
     }
 
     private sealed class RoutingHandler(HttpStatusCode createUserStatus) : HttpMessageHandler
@@ -110,7 +102,7 @@ public class EntraInviteProvisionerTests
             {
                 return new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = JsonContent.Create(new { access_token = "graph-token" }),
+                    Content = JsonContent.Create(new { access_token = "admin-token" }),
                 };
             }
 

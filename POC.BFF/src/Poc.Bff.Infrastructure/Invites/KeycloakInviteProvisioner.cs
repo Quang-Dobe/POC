@@ -14,26 +14,29 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
 {
     public const string HttpClientName = "KeycloakAdmin";
 
-    private const string TempPassword = "ChangeMe-1!";
     private const string UpdatePasswordAction = "UPDATE_PASSWORD";
 
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IPasswordGenerator _passwordGenerator;
     private readonly ILogger<KeycloakInviteProvisioner> _logger;
     private readonly KeycloakAdminOptions _admin;
     private readonly InviteOptions _invite;
 
     public KeycloakInviteProvisioner(
         IHttpClientFactory httpClientFactory,
+        IPasswordGenerator passwordGenerator,
         IOptions<KeycloakAdminOptions> adminOptions,
         IOptions<InviteOptions> inviteOptions,
         ILogger<KeycloakInviteProvisioner> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(passwordGenerator);
         ArgumentNullException.ThrowIfNull(adminOptions);
         ArgumentNullException.ThrowIfNull(inviteOptions);
         ArgumentNullException.ThrowIfNull(logger);
 
         _httpClientFactory = httpClientFactory;
+        _passwordGenerator = passwordGenerator;
         _logger = logger;
         _admin = adminOptions.Value;
         _invite = inviteOptions.Value;
@@ -105,6 +108,8 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
     {
         var usersUrl = $"{baseUrl}/admin/realms/{_admin.Realm}/users";
 
+        var generatedPassword = _passwordGenerator.Generate();
+
         var body = new CreateUserRequest(
             Username: request.Username,
             Enabled: true,
@@ -117,7 +122,7 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
             RequiredActions: new[] { UpdatePasswordAction },
             Credentials: new[]
             {
-                new CredentialRequest(Type: "password", Value: TempPassword, Temporary: true),
+                new CredentialRequest(Type: "password", Value: generatedPassword, Temporary: true),
             });
 
         var client = _httpClientFactory.CreateClient(HttpClientName);
@@ -142,7 +147,11 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
             if (response.StatusCode == HttpStatusCode.Conflict)
             {
                 _logger.LogInformation("Keycloak invite: the user already existed (idempotent re-invite).");
-                return new InviteOutcome(request.Username, RedeemUrl(baseUrl), AlreadyExisted: true);
+                return new InviteOutcome(
+                    request.Username,
+                    RedeemUrl(baseUrl),
+                    AlreadyExisted: true,
+                    GeneratedPassword: string.Empty);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -152,7 +161,11 @@ public sealed class KeycloakInviteProvisioner : IInviteProvisioner
             }
 
             _logger.LogInformation("Keycloak invite: provisioned a new external user (UPDATE_PASSWORD required).");
-            return new InviteOutcome(request.Username, RedeemUrl(baseUrl), AlreadyExisted: false);
+            return new InviteOutcome(
+                request.Username,
+                RedeemUrl(baseUrl),
+                AlreadyExisted: false,
+                GeneratedPassword: generatedPassword);
         }
     }
 

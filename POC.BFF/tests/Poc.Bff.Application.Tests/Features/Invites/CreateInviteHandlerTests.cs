@@ -37,7 +37,9 @@ public class CreateInviteHandlerTests
     [Fact]
     public async Task Handle_ProvisionerSucceeds_ReturnsSuccessWithMappedResponse()
     {
-        var outcome = new InviteOutcome("erin@example.com", "https://invite.stub/redeem/x", AlreadyExisted: false);
+        var outcome = new InviteOutcome(
+            "erin@example.com", "https://invite.stub/redeem/x", AlreadyExisted: false,
+            GeneratedPassword: "Generated-Pw-1!");
         _provisioner
             .ProvisionAsync(Arg.Any<InviteRequest>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(outcome));
@@ -50,13 +52,16 @@ public class CreateInviteHandlerTests
         result.Value.Subject.Should().Be("erin@example.com");
         result.Value.RedeemUrl.Should().Be("https://invite.stub/redeem/x");
         result.Value.AlreadyExisted.Should().BeFalse();
+        result.Value.GeneratedPassword.Should().Be("Generated-Pw-1!");
     }
 
     [Fact]
     public async Task Handle_ProvisionerSucceeds_CallsStoreAddWithGrantFromOptions()
     {
 
-        var outcome = new InviteOutcome("erin@example.com", "https://invite.stub/redeem/x", AlreadyExisted: false);
+        var outcome = new InviteOutcome(
+            "erin@example.com", "https://invite.stub/redeem/x", AlreadyExisted: false,
+            GeneratedPassword: "Generated-Pw-1!");
         _provisioner
             .ProvisionAsync(Arg.Any<InviteRequest>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult(outcome));
@@ -77,7 +82,9 @@ public class CreateInviteHandlerTests
     {
 
         InviteRequest? captured = null;
-        var outcome = new InviteOutcome("erin@example.com", "https://invite.stub/redeem/x", AlreadyExisted: false);
+        var outcome = new InviteOutcome(
+            "erin@example.com", "https://invite.stub/redeem/x", AlreadyExisted: false,
+            GeneratedPassword: "Generated-Pw-1!");
         _provisioner
             .ProvisionAsync(
                 Arg.Do<InviteRequest>(r => captured = r),

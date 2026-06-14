@@ -56,6 +56,7 @@ public sealed class CreateInviteHandler
         return Result.Success(new CreateInviteResponse(
             Subject: outcome.Subject,
             RedeemUrl: outcome.RedeemUrl,
-            AlreadyExisted: outcome.AlreadyExisted));
+            AlreadyExisted: outcome.AlreadyExisted,
+            GeneratedPassword: outcome.GeneratedPassword));
     }
 }
