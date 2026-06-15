@@ -3,12 +3,6 @@
   "runtime": {
     "host": {
       "mode": "development",
-      "cors": {
-        "origins": [
-          "http://localhost:3000"
-        ],
-        "allow-credentials": false
-      },
       "authentication": {
         "provider": "AzureAD",
         "jwt": {

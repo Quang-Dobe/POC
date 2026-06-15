@@ -9,6 +9,7 @@ class Config:
     auth_issuer: str
     auth_audience: str
     auth_jwks_url: str
+    auth_verify_ssl: bool
     foundry_project_endpoint: str
     model_deployment_name: str
     api_version: str
@@ -46,6 +47,8 @@ def load_config() -> Config:
         auth_issuer=os.environ["AUTH_AUTHORITY"],
         auth_audience=os.environ["AUTH_API_AUDIENCE"],
         auth_jwks_url=os.environ["AUTH_JWKS_URL"],
+        auth_verify_ssl=os.environ.get("AGENT_VERIFY_SSL", "true").strip().lower()
+        in ("1", "true", "yes", "on"),
         foundry_project_endpoint=os.environ["AZ_FOUNDRY_PROJECT_ENDPOINT"],
         model_deployment_name=os.environ["AZ_FOUNDRY_MODEL_DEPLOYMENT_NAME"],
         api_version=os.environ.get("API_VERSION", "2025-05-01"),

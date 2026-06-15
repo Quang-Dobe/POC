@@ -114,11 +114,12 @@ public sealed class EntraInviteProvisioner : IInviteProvisioner
         var usersUrl = $"{_graph.BaseUrl.TrimEnd('/')}/users";
 
         var mailNickname = MailNickname(request.Username);
+        var userPrincipalName = $"{mailNickname}@{_graph.UserDomain}";
         var body = new CreateUserRequest(
             AccountEnabled: true,
             DisplayName: request.DisplayName ?? request.Username,
             MailNickname: mailNickname,
-            UserPrincipalName: $"{mailNickname}@{_graph.UserDomain}",
+            UserPrincipalName: userPrincipalName,
             Mail: request.Username,
             PasswordProfile: new PasswordProfile(
                 Password: _invite.DefaultPassword!,
@@ -146,7 +147,7 @@ public sealed class EntraInviteProvisioner : IInviteProvisioner
             if (response.StatusCode == HttpStatusCode.Conflict)
             {
                 _logger.LogInformation("Entra invite: the user already existed (idempotent re-invite).");
-                return new InviteOutcome(request.Username, AlreadyExisted: true, PasswordSet: false);
+                return new InviteOutcome(userPrincipalName, AlreadyExisted: true, PasswordSet: false);
             }
 
             if (!response.IsSuccessStatusCode)
@@ -156,7 +157,7 @@ public sealed class EntraInviteProvisioner : IInviteProvisioner
             }
 
             _logger.LogInformation("Entra invite: provisioned a new member user with the default password.");
-            return new InviteOutcome(request.Username, AlreadyExisted: false, PasswordSet: true);
+            return new InviteOutcome(userPrincipalName, AlreadyExisted: false, PasswordSet: true);
         }
     }
 

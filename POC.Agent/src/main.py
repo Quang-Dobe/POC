@@ -17,15 +17,13 @@ _openai_client = make_openai_client(_project)
 
 app = FastAPI()
 
-_IS_DEV = _config.environment == "Development"
-
 _log.info(
     "auth config: environment=%s issuer=%s audience=%s jwks_url=%s verify_ssl=%s",
     _config.environment,
     _config.auth_issuer,
     _config.auth_audience,
     _config.auth_jwks_url,
-    not _IS_DEV,
+    _config.auth_verify_ssl,
 )
 
 
@@ -52,7 +50,7 @@ def _authenticate(request: Request, route: str) -> tuple[str, str]:
             raw_token,
             _config.auth_issuer,
             _config.auth_audience,
-            verify_ssl=not _IS_DEV,
+            verify_ssl=_config.auth_verify_ssl,
             jwks_url=_config.auth_jwks_url,
         )
     except ExternalTokenError as exc:

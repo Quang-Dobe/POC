@@ -6,21 +6,51 @@ services:
     image: poc-backend
     environment:
       ENV: PROD
-      ASPNETCORE_URLS: http://+:8081
       ASPNETCORE_ENVIRONMENT: Production
       Auth__Authority: ${AUTH_AUTHORITY}
+      Auth__ClientId: ${AUTH_BFF_CLIENT_ID}
+      Auth__FrontendReturnUrl: ${AUTH_FRONTEND_RETURN_URL}
+      Auth__RedirectUri: ${AUTH_REDIRECT_URI}
       Cors__SpaOrigin: ${CORS_SPA_ORIGIN}
       KeyVault__VaultUri: ${KEYVAULT_VAULT_URI}
-      AZURE_TENANT_ID: ${TENANT_ID}
-      AZURE_CLIENT_ID: ${AUTH_API_CLIENT_ID}
-      AZURE_CLIENT_SECRET: ${AUTH_API_CLIENT_SECRET}
       Agent__Host: ${AGENT_HOST}
       Agent__Port: ${AGENT_PORT}
-      Session__RedisAddress: ${REDIS_ADDRESS}
+      Session__CookieName: ${SESSION_COOKIE_NAME}
+      Session__TtlMinutes: ${SESSION_TTL_MINUTES}
+      Session__RedisAddress: ${SESSION_REDIS_ADDRESS}
+      DataProtection__ApplicationName: ${DATA_PROTECTION_APPLICATION_NAME}
+      DataProtection__RedisKey: ${DATA_PROTECTION_REDIS_KEY}
+      IdpSimulator__Issuer: ${IDP_SIMULATOR_ISSUER}
+      IdpSimulator__Audience: ${IDP_SIMULATOR_AUDIENCE}
+      IdpSimulator__DownstreamTokenTtlSeconds: ${IDP_SIMULATOR_DOWNSTREAM_TOKEN_TTL_SECONDS}
+      IdpSimulator__SigningKeyId: ${IDP_SIMULATOR_SIGNING_KEY_ID}
+      EntraGraph__BaseUrl: ${ENTRA_GRAPH_BASE_URL}
+      EntraGraph__Authority: ${ENTRA_GRAPH_AUTHORITY}
+      EntraGraph__Scope: ${ENTRA_GRAPH_SCOPE}
+      EntraGraph__TenantId: ${TENANT_ID}
+      EntraGraph__ClientId: ${ENTRA_GRAPH_CLIENT_ID}
+      EntraGraph__UserDomain: ${ENTRA_GRAPH_USER_DOMAIN}
+      Invite__TenantId: ${TENANT_ID}
+      AZURE_TENANT_ID: ${TENANT_ID}
+      AZURE_CLIENT_ID: ${AZURE_KV_CLIENT_ID}
+      AZURE_CLIENT_SECRET: ${AZURE_KV_CLIENT_SECRET}
+      ASPNETCORE_URLS: https://+:8081
+      ASPNETCORE_Kestrel__Certificates__Default__Path: /certs/dev-tls.crt
+      ASPNETCORE_Kestrel__Certificates__Default__KeyPath: /certs/dev-tls.key
+    depends_on:
+      - redis
     extra_hosts:
       - "localhost:host-gateway"
     ports:
       - "${BE_PORT}:8081"
+    volumes:
+      - ./certs:/certs:ro
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT}:${REDIS_PORT}"
 
   frontend:
     build:
@@ -32,6 +62,7 @@ services:
     depends_on:
       - backend
     ports:
-      - "${FE_PORT}:80"
+      - "${FE_PORT}:443"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro

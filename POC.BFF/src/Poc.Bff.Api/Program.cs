@@ -67,10 +67,12 @@ builder.Services.AddOptions<InviteOptions>()
     .ValidateDataAnnotations()
     .ValidateOnStart();
 
-builder.Services.AddOptions<KeycloakAdminOptions>()
-    .Bind(builder.Configuration.GetSection(KeycloakAdminOptions.SectionName))
-    .ValidateDataAnnotations()
-    .ValidateOnStart();
+if (env == "DEV")
+{
+    builder.Services.AddOptions<KeycloakAdminOptions>()
+        .Bind(builder.Configuration.GetSection(KeycloakAdminOptions.SectionName))
+        .ValidateDataAnnotations();
+}
 
 // EntraGraph is the PROD-only invite path; it is validated on first resolution (which only
 // happens when ENV=PROD wires EntraInviteProvisioner) rather than ValidateOnStart, so the DEV
